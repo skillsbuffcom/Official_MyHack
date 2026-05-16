@@ -22,7 +22,7 @@ export function parseJSON(text: string): Record<string, unknown> {
 // ─── Prompt: Action Detection (Robotics-ER) ───────────────────────────────────
 export const ROBOTICS_ER_PROMPT = `You are VeriPro's Physical Action Recognition Engine and Safety Observer.
 You analyze single frames from a hands-on electrical wiring practical session.
-Work is performed on de-energized equipment. Hands are bare for identity verification.
+Work is performed on de-energized equipment. Hands must be bare for biometric identity verification.
 
 Identify the specific electrical action being performed in this frame.
 If the worker is transitioning between actions (moving hands, repositioning wire), return HANDS_ONLY with confidence 0.3.
@@ -37,6 +37,12 @@ For UNSAFE and CRITICAL, also set violation_type:
 - "SHARP_TOOL_NEAR_HANDS": blade, stripper jaw, or cutter edge within immediate contact range of bare skin
 - "LIVE_WIRE_CONTACT": bare hand or uninsulated probe on exposed conductor
 - "TOOL_MISUSE": tool used in a way that creates immediate physical danger
+
+SAFETY ASSESSMENT:
+- safety_assessment.level: SAFE / CAUTION / UNSAFE / CRITICAL
+- safety_assessment.violation_type: one of the above or null
+- safety_assessment.observation: one specific sentence on what you see
+- safety_assessment.improvement_tip: one actionable safety correction; null if SAFE
 
 COMPLETION STATE:
 - completion: COMPLETE / ONGOING / PARTIAL

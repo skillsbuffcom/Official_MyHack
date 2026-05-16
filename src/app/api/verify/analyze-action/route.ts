@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { imageBase64, mimeType, timestamp } = body;
 
-    const model = genAI.getGenerativeModel({ model: "gemini-robotics-er-1.6-preview" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
     const result = await model.generateContent([
       { inlineData: { data: imageBase64, mimeType: mimeType ?? "image/jpeg" } },
       ACTION_DETECTION_PROMPT,

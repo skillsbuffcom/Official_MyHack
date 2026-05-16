@@ -36,11 +36,9 @@ interface Hands {
   send(input: { image: HTMLVideoElement }): Promise<void>;
   close(): void;
 }
-
 export default function RecordSessionPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const [seconds, setSeconds] = useState(0);
-  // null = awaiting first hand entry, false = verified, true = flagged
   const [isFlagged, setIsFlagged] = useState<boolean | null>(null);
   const [handPresent, setHandPresent] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -50,14 +48,14 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
 
   const [masterImage, setMasterImage] = useState<string | null>(null);
   const [masterProfile, setMasterProfile] = useState<string | null>(null);
-
   const [anchorLabels, setAnchorLabels] = useState<{ nail: string | null; marker: string | null }>({ nail: null, marker: null });
+  const [currentSnapshot, setCurrentSnapshot] = useState<string | null>(null);
 
   useEffect(() => {
     const timer = setTimeout(() => {
       const img = localStorage.getItem(`hand_master_${id}`) ?? localStorage.getItem("hand_master_latest");
       const profile = localStorage.getItem(`hand_profile_${id}`) ?? localStorage.getItem("hand_profile_latest");
-      if (img) { setMasterImage(img); }
+      if (img) setMasterImage(img);
       if (profile) {
         setMasterProfile(profile);
         try {
@@ -67,21 +65,17 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
             ? `${parsed.physical_marker.type} — ${parsed.physical_marker.location}`
             : null;
           setAnchorLabels({ nail, marker });
-          if (nail) console.log(`[SYS]: Nail anchor → ${nail}`);
-          if (marker) console.log(`[SYS]: Marker anchor → ${parsed.physical_marker.type} at ${parsed.physical_marker.location}`);
-          if (!nail && !marker) console.log(`[SYS]: No anchors — re-register to enable anchor checks.`);
         } catch { /* ignore */ }
       }
     }, 0);
     return () => clearTimeout(timer);
   }, [id]);
 
-
   const videoRef = useRef<HTMLVideoElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const router = useRouter();
-  const handsRef = useRef<Hands | null>(null);
+  const handsRef = useRef<unknown>(null);
   const handPresentRef = useRef(false);
   const isFlaggedRef = useRef<boolean | null>(null);
   const reEntryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -89,6 +83,7 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
   const noHandSinceRef = useRef<number | null>(null);
   const HAND_LOST_MS = 1500;
   const [waitingForGesture, setWaitingForGesture] = useState(false);
+  const [gestureCountdown, setGestureCountdown] = useState<number | null>(null);
   const waitingForGestureRef = useRef(false);
   const gestureHoldRef = useRef<number | null>(null);
   const gestureFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -97,9 +92,9 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
   const scanLifecycleRef = useRef(0);
   const scanAbortControllerRef = useRef<AbortController | null>(null);
   const latestLandmarksRef = useRef<{ x: number; y: number; z: number }[] | null>(null);
-  const sessionRatiosRef = useRef<{ palmWidth: number; indexLen: number; ringLen: number; pinkyLen: number } | null>(null);
+  const reverifyIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Action log (Robotics-ER live analysis)
+  // Action log
   const secondsRef = useRef(0);
   const [actionLog, setActionLog] = useState<ActionLogEntry[]>([]);
   const [isAnalyzingAction, setIsAnalyzingAction] = useState(false);
@@ -108,7 +103,7 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
   const actionLogCounterRef = useRef(0);
   const actionLogScrollRef = useRef<HTMLDivElement>(null);
 
-  // UI-only state
+  // UI state
   const [showMatchFlash, setShowMatchFlash] = useState(false);
   const prevFlaggedRef = useRef<boolean | null>(null);
 
@@ -122,19 +117,11 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
       duration: 5200,
       style: { marginTop: "176px", marginLeft: "16px", maxWidth: "280px" },
     };
-
     if (variant === "error") {
-      toast.error("Identity mismatch", {
-        ...shared,
-        description: "Bio-Auth failed. Hands were not recognized.",
-      });
+      toast.error("Identity mismatch", { ...shared, description: "Bio-Auth failed. Hands were not recognized." });
       return;
     }
-
-    toast.success("Identity confirmed", {
-      ...shared,
-      description: "Bio-Auth passed. Hand identity locked.",
-    });
+    toast.success("Identity confirmed", { ...shared, description: "Bio-Auth passed. Hand identity locked." });
   }, []);
 
   useEffect(() => {
@@ -150,10 +137,8 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
       if (gestureFallbackRef.current) { clearTimeout(gestureFallbackRef.current); gestureFallbackRef.current = null; }
       if (gestureCountdownTimerRef.current) { clearInterval(gestureCountdownTimerRef.current); gestureCountdownTimerRef.current = null; }
       if (actionIntervalRef.current) { clearInterval(actionIntervalRef.current); actionIntervalRef.current = null; }
-      if (scanAbortControllerRef.current) {
-        scanAbortControllerRef.current.abort();
-        scanAbortControllerRef.current = null;
-      }
+      if (reverifyIntervalRef.current) { clearInterval(reverifyIntervalRef.current); reverifyIntervalRef.current = null; }
+      if (scanAbortControllerRef.current) { scanAbortControllerRef.current.abort(); scanAbortControllerRef.current = null; }
     };
     window.addEventListener("beforeunload", stopEverything);
     return () => { window.removeEventListener("beforeunload", stopEverything); stopEverything(); };
@@ -169,9 +154,7 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
     const scanVersion = scanLifecycleRef.current + 1;
     scanLifecycleRef.current = scanVersion;
     const ensureScanActive = () => {
-      if (scanLifecycleRef.current !== scanVersion) {
-        throw new Error("SCAN_ABORTED");
-      }
+      if (scanLifecycleRef.current !== scanVersion) throw new Error("SCAN_ABORTED");
     };
     const controller = new AbortController();
     scanAbortControllerRef.current = controller;
@@ -181,12 +164,7 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
 
     const pause = (ms: number) => new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
-        try {
-          ensureScanActive();
-          resolve();
-        } catch (error) {
-          reject(error);
-        }
+        try { ensureScanActive(); resolve(); } catch (error) { reject(error); }
       }, ms);
       controller.signal.addEventListener("abort", () => {
         clearTimeout(timer);
@@ -194,7 +172,6 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
       }, { once: true });
     });
 
-    // Laplacian variance — higher = sharper
     const blurScore = (dataUrl: string): Promise<number> =>
       new Promise((resolve) => {
         const img = document.createElement("img") as HTMLImageElement;
@@ -211,7 +188,7 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
             g[i] = 0.299 * data[i * 4] + 0.587 * data[i * 4 + 1] + 0.114 * data[i * 4 + 2];
           let sum = 0, sq = 0, n = 0;
           for (let y = 1; y < S - 1; y++) for (let x = 1; x < S - 1; x++) {
-            const l = Math.abs(4*g[y*S+x] - g[(y-1)*S+x] - g[(y+1)*S+x] - g[y*S+x-1] - g[y*S+x+1]);
+            const l = Math.abs(4 * g[y * S + x] - g[(y - 1) * S + x] - g[(y + 1) * S + x] - g[y * S + x - 1] - g[y * S + x + 1]);
             sum += l; sq += l * l; n++;
           }
           const m = sum / n;
@@ -221,21 +198,43 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
         img.src = dataUrl;
       });
 
-    const captureStill = async (): Promise<string> => {
-      ensureScanActive();
-      if (!videoRef.current) throw new Error("No video");
+    const applyGreenFilter = (source: HTMLImageElement | HTMLVideoElement, w: number, h: number): string => {
       const cv = document.createElement("canvas");
-      cv.width = videoRef.current.videoWidth;
-      cv.height = videoRef.current.videoHeight;
+      cv.width = w; cv.height = h;
       const cx = cv.getContext("2d");
       if (!cx) throw new Error("No context");
-      cx.drawImage(videoRef.current, 0, 0, cv.width, cv.height);
-      // Green-channel filter
-      const id = cx.getImageData(0, 0, cv.width, cv.height);
+      cx.drawImage(source, 0, 0, w, h);
+      const id = cx.getImageData(0, 0, w, h);
       const d = id.data;
       for (let i = 0; i < d.length; i += 4) { d[i] = d[i + 1]; d[i + 2] = d[i + 1]; }
       cx.putImageData(id, 0, 0);
       return cv.toDataURL("image/jpeg", 0.97);
+    };
+
+    const captureStill = async (): Promise<string> => {
+      ensureScanActive();
+      if (streamRef.current) {
+        const track = streamRef.current.getVideoTracks()[0];
+        if (track && "ImageCapture" in window) {
+          try {
+            type IC = { takePhoto(): Promise<Blob> };
+            const IC = (window as unknown as { ImageCapture: new (t: MediaStreamTrack) => IC }).ImageCapture;
+            const blob = await new IC(track).takePhoto();
+            return await new Promise<string>((res, rej) => {
+              const url = URL.createObjectURL(blob);
+              const img = new Image();
+              img.onload = () => {
+                URL.revokeObjectURL(url);
+                try { res(applyGreenFilter(img, img.naturalWidth, img.naturalHeight)); } catch (e) { rej(e); }
+              };
+              img.onerror = () => { URL.revokeObjectURL(url); rej(new Error("img load failed")); };
+              img.src = url;
+            });
+          } catch { /* fall through to canvas */ }
+        }
+      }
+      if (!videoRef.current) throw new Error("No video");
+      return applyGreenFilter(videoRef.current, videoRef.current.videoWidth || 1280, videoRef.current.videoHeight || 720);
     };
 
     const captureBest = async (): Promise<string> => {
@@ -249,51 +248,16 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
         if (score >= THRESHOLD) break;
         if (a < 1) await pause(150);
       }
+      console.log(`[BLUR] score: ${bestScore.toFixed(1)}`);
       return best;
     };
 
-    const computeRatios = (lm: { x: number; y: number; z: number }[]) => {
-      const dist = (a: number, b: number) => {
-        const dx = lm[a].x - lm[b].x;
-        const dy = lm[a].y - lm[b].y;
-        return Math.sqrt(dx * dx + dy * dy);
-      };
-      const midLen = dist(9, 12); 
-      if (midLen < 0.01) return null;
-      return {
-        palmWidth: dist(5, 17) / midLen,
-        indexLen:  dist(5, 8)  / midLen,
-        ringLen:   dist(13, 16) / midLen,
-        pinkyLen:  dist(17, 20) / midLen,
-      };
-    };
-
-    if (sessionRatiosRef.current && latestLandmarksRef.current) {
-      const current = computeRatios(latestLandmarksRef.current);
-      if (current) {
-        const base = sessionRatiosRef.current;
-        const THRESHOLD = 0.15;
-        const diffs = {
-          palmWidth: Math.abs(current.palmWidth - base.palmWidth) / base.palmWidth,
-          indexLen:  Math.abs(current.indexLen  - base.indexLen)  / base.indexLen,
-          ringLen:   Math.abs(current.ringLen   - base.ringLen)   / base.ringLen,
-          pinkyLen:  Math.abs(current.pinkyLen  - base.pinkyLen)  / base.pinkyLen,
-        };
-        const entries = Object.entries(diffs) as [string, number][];
-        const [worstKey, worstVal] = entries.sort((a, b) => b[1] - a[1])[0];
-        if (worstVal > THRESHOLD) {
-          isFlaggedRef.current = true; setIsFlagged(true);
-          isDeepScanningRef.current = false; setIsDeepScanning(false);
-          addLog(`HAND GEOMETRY MISMATCH — ${worstKey} off by ${(worstVal * 100).toFixed(0)}%.`);
-          showBiometricToast("error");
-          return;
-        }
-      }
-    }
 
     try {
       const currentData = await captureBest();
       ensureScanActive();
+      setCurrentSnapshot(currentData);
+
       const res = await fetch("/api/verify/deep-auth", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -301,21 +265,19 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
         body: JSON.stringify({ currentImage: currentData, masterImage, masterProfile }),
       });
       ensureScanActive();
-      const data = await res.json() as { 
-        observed?: { hand?: string; nail?: string; regmark?: string; marks?: string }; 
-        flags?: string[]; 
-        result?: string 
-      };
+      const data = await res.json() as Record<string, unknown>;
       ensureScanActive();
+      console.log("DEEP-AUTH:", data.result, "| FLAGS:", data.flags);
 
       if (data.observed) {
-        const o = data.observed;
-        const f = data.flags ?? [];
+        const o = data.observed as Record<string, unknown>;
+        const f: string[] = (data.flags as string[]) ?? [];
         setScanBreakdown([
-          { q: "HAND", label: "Hand visible?", answer: o.hand ?? "?", flags: o.hand === "NO" },
-          { q: "NAIL", label: `Nails (reg: ${anchorLabels.nail ?? "?"})`, answer: o.nail ?? "?", flags: f.some((s: string) => s.startsWith("nail_mismatch")) },
-          ...(o.regmark != null ? [{ q: "REGMARK", label: "Registered mark found?", answer: o.regmark as string, flags: o.regmark === "NO" }] : []),
-          { q: "MARKS", label: "Unexpected marks?", answer: (o.marks?.toLowerCase() !== "none" ? o.marks : "none") ?? "none", flags: f.some((s: string) => s.startsWith("unexpected_marks")) },
+          { q: "HAND",    label: "Hand visible?",              answer: (o.hand as string) ?? "?",    flags: o.hand === "NO" },
+          { q: "NAIL",    label: `Nails (reg: ${anchorLabels.nail ?? "?"})`, answer: (o.nail as string) ?? "?", flags: f.some(s => s.startsWith("nail")) },
+          ...(o.regmark != null ? [{ q: "REGMARK", label: "Registered mark?", answer: o.regmark as string, flags: o.regmark === "NO" }] : []),
+          { q: "MARKS",   label: "Marks",                      answer: (o.marks as string) ?? "none", flags: f.some(s => s.startsWith("marker_not_confirmed") || s.startsWith("unexpected_marks")) },
+          { q: "COMPARE", label: "Same person?",               answer: (o.compare as string) ?? "?",  flags: (o.compare as string | null | undefined) !== "YES" },
         ]);
       }
 
@@ -323,22 +285,16 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
         isFlaggedRef.current = true; setIsFlagged(true);
         addLog("!!! IDENTITY MISMATCH — HANDS NOT RECOGNIZED.");
         showBiometricToast("error");
-
-        // Flag the session in DB
         await fetch(`/api/session/${id}/flag`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ reason: "visual_mismatch", flags: data.flags }),
+          body: JSON.stringify({ reason: "visual_mismatch" }),
         });
       } else if (data.result === "MATCH") {
         if (handPresentRef.current) {
           isFlaggedRef.current = false; setIsFlagged(false);
           addLog("IDENTITY CONFIRMED. Hands locked.");
           showBiometricToast("success");
-          if (!sessionRatiosRef.current && latestLandmarksRef.current) {
-            const ratios = computeRatios(latestLandmarksRef.current);
-            if (ratios) { sessionRatiosRef.current = ratios; }
-          }
         } else {
           addLog("Scan complete — hands left frame during scan.");
         }
@@ -396,8 +352,6 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
             safetyAssessment: data.safety_assessment,
           };
           setActionLog(prev => [...prev, entry]);
-          
-          // Save to Firestore via current API structure
           await fetch(`/api/session/${id}/save-log`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -428,61 +382,74 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
     prevFlaggedRef.current = isFlagged;
   }, [isFlagged]);
 
-  const uploadChunk = useCallback(() => {
-    // Disabled for hackathon demo to avoid Firebase Storage configuration blockers.
-    // AI analysis remains functional via Base64 frame capture.
-  }, []);
+  const uploadChunk = useCallback((blob: Blob) => {
+    const chunkIndex = chunkIndexRef.current++;
+    const formData = new FormData();
+    formData.append("chunk", blob);
+    formData.append("chunkIndex", chunkIndex.toString());
+    fetch(`/api/session/${id}/upload-chunk`, { method: "POST", body: formData }).catch(() => {});
+  }, [id]);
 
   const initHands = useCallback(() => {
-    if (typeof window === "undefined" || !(window as unknown as { Hands?: new (o: unknown) => Hands }).Hands || handsRef.current) return;
-    const HandsClass = (window as unknown as { Hands?: new (o: unknown) => Hands }).Hands;
-    if (!HandsClass) return;
+    if (typeof window === "undefined" || !(window as unknown as Record<string, unknown>).Hands || handsRef.current) return;
+    type LM = { x: number; y: number; z: number };
+    const HandsClass = (window as unknown as Record<string, unknown>).Hands as new (opts: unknown) => {
+      setOptions(o: unknown): void;
+      onResults(cb: (results: { multiHandLandmarks?: LM[][] }) => void): void;
+      send(data: unknown): Promise<void>;
+    };
     const hands = new HandsClass({
       locateFile: (file: string) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
     });
-    hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
+    hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
 
-    hands.onResults((results: { multiHandLandmarks?: { x: number; y: number; z: number }[][] }) => {
-      const handCount = results.multiHandLandmarks?.length ?? 0;
-      const hasHand = handCount >= 1;
+    hands.onResults((results) => {
+      const handCount = Array.isArray(results.multiHandLandmarks) ? results.multiHandLandmarks.length : 0;
+      const hasBothHands = handCount === 2;
 
-      if (hasHand) {
+      if (handCount > 0) {
         noHandSinceRef.current = null;
         if (results.multiHandLandmarks?.[0]) latestLandmarksRef.current = results.multiHandLandmarks[0];
 
         if (!handPresentRef.current) {
           handPresentRef.current = true;
           setHandPresent(true);
-          waitingForGestureRef.current = true;
-          setWaitingForGesture(true);
-          gestureHoldRef.current = null;
-          console.log("[AI]: Hand detected — scanning in 4s...");
         }
 
-        if (isFlaggedRef.current === true && !waitingForGestureRef.current && !isDeepScanningRef.current && gestureHoldRef.current === null) {
+        // Only trigger the re-verification gesture if BOTH hands are present
+        if (hasBothHands && isFlaggedRef.current === true && !waitingForGestureRef.current && !isDeepScanningRef.current && gestureHoldRef.current === null) {
           waitingForGestureRef.current = true;
           setWaitingForGesture(true);
         }
 
         if (waitingForGestureRef.current && gestureHoldRef.current === null) {
-          gestureHoldRef.current = Date.now();
-          gestureCountdownValueRef.current = 4;
+          if (hasBothHands) {
+            gestureHoldRef.current = Date.now();
+            gestureCountdownValueRef.current = 4;
+            setGestureCountdown(4);
 
-          gestureCountdownTimerRef.current = setInterval(() => {
-            gestureCountdownValueRef.current -= 1;
-            if (gestureCountdownValueRef.current <= 0) {
-              if (gestureCountdownTimerRef.current) clearInterval(gestureCountdownTimerRef.current);
-            }
-          }, 1000);
+            gestureCountdownTimerRef.current = setInterval(() => {
+              gestureCountdownValueRef.current -= 1;
+              setGestureCountdown(Math.max(0, gestureCountdownValueRef.current));
+            }, 1000);
 
-          gestureFallbackRef.current = setTimeout(() => {
-            if (!waitingForGestureRef.current) return;
-            if (gestureCountdownTimerRef.current) { clearInterval(gestureCountdownTimerRef.current); gestureCountdownTimerRef.current = null; }
-            gestureHoldRef.current = null;
-            waitingForGestureRef.current = false;
-            setWaitingForGesture(false);
-            auditRef.current();
-          }, 4100);
+            gestureFallbackRef.current = setTimeout(() => {
+              if (!waitingForGestureRef.current) return;
+              if (gestureCountdownTimerRef.current) { clearInterval(gestureCountdownTimerRef.current); gestureCountdownTimerRef.current = null; }
+              gestureHoldRef.current = null;
+              waitingForGestureRef.current = false;
+              setWaitingForGesture(false);
+              setGestureCountdown(null);
+              auditRef.current();
+            }, 4100);
+          }
+        } else if (waitingForGestureRef.current && gestureHoldRef.current !== null && !hasBothHands) {
+          // If we were counting down but lost one hand, reset
+          if (gestureFallbackRef.current) { clearTimeout(gestureFallbackRef.current); gestureFallbackRef.current = null; }
+          if (gestureCountdownTimerRef.current) { clearInterval(gestureCountdownTimerRef.current); gestureCountdownTimerRef.current = null; }
+          gestureHoldRef.current = null;
+          setGestureCountdown(null);
+          console.log("[AI]: Hand lost during countdown — resetting.");
         }
       } else {
         if (noHandSinceRef.current === null) noHandSinceRef.current = Date.now();
@@ -496,17 +463,13 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
           gestureHoldRef.current = null;
           if (gestureFallbackRef.current) { clearTimeout(gestureFallbackRef.current); gestureFallbackRef.current = null; }
           if (gestureCountdownTimerRef.current) { clearInterval(gestureCountdownTimerRef.current); gestureCountdownTimerRef.current = null; }
+          setGestureCountdown(null);
         }
         waitingForGestureRef.current = false;
         setWaitingForGesture(false);
         isFlaggedRef.current = true; setIsFlagged(true);
         console.log("[AI]: HANDS LEFT FRAME — FLAGGED.");
-        
-        fetch(`/api/session/${id}/flag`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ reason: "RECORDING_GAP" }),
-        }).catch(() => {});
+        fetch(`/api/session/${id}/flag`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reason: "RECORDING_GAP" }) }).catch(() => {});
       }
     });
 
@@ -526,12 +489,12 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
     async function startSession() {
       try {
         if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 }, audio: false });
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
         streamRef.current = stream;
         if (videoRef.current) videoRef.current.srcObject = stream;
 
         const processVideo = async () => {
-          if (videoRef.current && handsRef.current && isMediaPipeLoaded) {
+          if (videoRef.current && handsRef.current && isMediaPipeLoaded && videoRef.current.readyState >= 2) {
             try { await (handsRef.current as { send: (o: { image: HTMLVideoElement }) => Promise<void> }).send({ image: videoRef.current }); } catch { /* ignore */ }
           }
           requestAnimationFrame(processVideo);
@@ -546,8 +509,14 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
         recorder.start(10000);
         await fetch(`/api/session/${id}/recording-start`, { method: "POST" });
         actionIntervalRef.current = setInterval(() => { captureActionRef.current(); }, 10000);
+        // Silent re-verify every 45s — catches mid-session person swaps after initial lock
+        reverifyIntervalRef.current = setInterval(() => {
+          if (handPresentRef.current && isFlaggedRef.current === false && !isDeepScanningRef.current) {
+            auditRef.current();
+          }
+        }, 45000);
       } catch {
-        toast.error("Camera failed."); 
+        toast.error("Camera failed.");
       }
     }
     startSession();
@@ -575,17 +544,35 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
   };
 
   const statusLabel = isFlagged === null ? "Monitoring" : isFlagged ? "Flagged" : "Locked";
-  const statusSub = isFlagged === null ? (waitingForGesture ? "Hold still — scanning soon" : handPresent ? "Verifying…" : "Show hands to begin") : isFlagged ? (handPresent ? "Identity mismatch" : "Hands left frame") : "Identity confirmed";
+  const statusSub = isFlagged === false
+    ? "Identity confirmed"
+    : waitingForGesture
+      ? `Scanning in ${gestureCountdown ?? 4}…`
+      : handPresent
+        ? "Hold hands steady — scan pending"
+        : isFlagged
+          ? "Hands left frame — show BOTH to verify"
+          : "Show BOTH hands to begin verification";
 
   return (
     <div className="fixed inset-0 bg-black text-white font-sans overflow-hidden">
       <Script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" strategy="afterInteractive" onLoad={initHands} />
-      
-      <video ref={videoRef} autoPlay muted playsInline className={`absolute inset-0 w-full h-full object-cover transition-[filter] duration-300 ${isFlagged === true ? "grayscale brightness-50" : ""} ${isDeepScanning ? "blur-[2px]" : ""}`} />
-      
+
+      <video ref={videoRef} autoPlay muted playsInline style={{ transform: "scaleX(-1)" }} className={`absolute inset-0 w-full h-full object-cover transition-[filter] duration-300 ${isFlagged === true ? "grayscale brightness-50" : ""} ${isDeepScanning ? "blur-[2px]" : ""}`} />
+
       {showMatchFlash && <div className="absolute inset-0 z-50 pointer-events-none border-4 border-[#2dd4bf] rounded-none animate-pulse" />}
       {isFlagged === true && <div className="absolute inset-0 z-20 pointer-events-none border-2 border-red-500/60 animate-pulse" />}
-      
+
+      {/* Countdown overlay */}
+      {waitingForGesture && gestureCountdown !== null && gestureCountdown > 0 && (
+        <div className="absolute inset-0 z-30 flex items-end justify-center pb-32 pointer-events-none">
+          <div className="flex flex-col items-center gap-2">
+            <span className="text-8xl font-bold text-white drop-shadow-[0_0_24px_rgba(45,212,191,0.8)]" style={{ textShadow: "0 0 32px #2dd4bf" }}>{gestureCountdown}</span>
+            <span className="text-xs font-semibold text-[#2dd4bf] uppercase tracking-[0.2em]">Scanning in…</span>
+          </div>
+        </div>
+      )}
+
       {/* HUD */}
       <div className="absolute top-0 left-0 right-0 h-24 bg-gradient-to-b from-black/60 to-transparent z-10 flex items-center justify-between px-6">
         <BrandMark className="scale-90 origin-left" />
@@ -602,10 +589,10 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
       </div>
 
       {/* Biometric Status */}
-      <div className="absolute left-6 top-32 z-10 flex flex-col gap-4 w-64">
+      <div className="absolute left-6 top-32 z-10 flex flex-col gap-4 w-72">
         <Card className="bg-black/60 backdrop-blur-xl border-white/10 p-4 rounded-2xl flex items-center gap-4">
           <div className={`size-12 rounded-2xl flex items-center justify-center border-2 ${isFlagged === false ? "border-[#2dd4bf] bg-[#2dd4bf]/10 text-[#2dd4bf]" : isFlagged === true ? "border-red-500 bg-red-500/10 text-red-500" : "border-white/20 bg-white/5 text-white/40"}`}>
-             {isFlagged === false ? <ShieldCheck /> : isFlagged === true ? <ShieldAlert /> : <Eye />}
+            {isFlagged === false ? <ShieldCheck /> : isFlagged === true ? <ShieldAlert /> : <Eye />}
           </div>
           <div>
             <p className="text-[10px] font-bold uppercase tracking-widest text-white/40">{statusLabel}</p>
@@ -613,22 +600,71 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
           </div>
         </Card>
 
-        {isDeepScanning && (
-          <Card className="bg-black/60 backdrop-blur-xl border-[#2dd4bf]/20 p-4 rounded-2xl animate-in slide-in-from-left duration-300">
-            <div className="flex items-center gap-3">
-              <Loader2 className="size-4 animate-spin text-[#2dd4bf]" />
-              <p className="text-xs font-semibold uppercase tracking-widest text-[#2dd4bf]">Scanning Biometrics</p>
-            </div>
-            {scanBreakdown && (
-              <div className="mt-4 space-y-2">
-                {scanBreakdown.map(s => (
-                  <div key={s.q} className="flex justify-between items-center text-[10px]">
-                    <span className="text-white/40 font-bold uppercase">{s.label}</span>
-                    <span className={`font-mono ${s.flags ? "text-red-400" : "text-[#2dd4bf]"}`}>{s.answer}</span>
-                  </div>
-                ))}
-              </div>
+        <Card className="bg-black/60 backdrop-blur-xl border-white/10 p-4 rounded-2xl">
+          <div className="flex items-center gap-3 mb-3">
+            {isDeepScanning ? (
+              <>
+                <Loader2 className="size-4 animate-spin text-[#2dd4bf]" />
+                <p className="text-xs font-semibold uppercase tracking-widest text-[#2dd4bf]">Scanning Biometrics</p>
+              </>
+            ) : (
+              <>
+                <Eye className="size-4 text-white/30" />
+                <p className="text-xs font-semibold uppercase tracking-widest text-white/30">Bio-Auth Log</p>
+              </>
             )}
+          </div>
+          {scanBreakdown ? (
+            <div className="space-y-2">
+              {scanBreakdown.map(s => (
+                <div key={s.q} className="flex items-start justify-between gap-2 text-[10px]">
+                  <span className="text-white/40 font-bold uppercase shrink-0">{s.label}</span>
+                  <span className={`font-mono text-right ${s.flags ? "text-red-400" : "text-[#2dd4bf]"}`}>{s.answer}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-[10px] text-white/20 uppercase tracking-widest">Awaiting first scan…</p>
+          )}
+          {(anchorLabels.nail || anchorLabels.marker) && (
+            <div className="mt-3 pt-3 border-t border-white/10 space-y-1">
+              <p className="text-[9px] font-bold uppercase tracking-widest text-white/30">Anchors</p>
+              {anchorLabels.nail && <p className="text-[10px] text-white/50">Nail: {anchorLabels.nail}</p>}
+              {anchorLabels.marker && <p className="text-[10px] text-white/50">Marker: {anchorLabels.marker}</p>}
+            </div>
+          )}
+        </Card>
+
+        {/* Reference image + live scan side by side */}
+        {(masterImage || currentSnapshot) && (
+          <Card className="bg-black/60 backdrop-blur-xl border-white/10 p-2 rounded-2xl overflow-hidden">
+            <div className="grid grid-cols-2 gap-1.5">
+              {masterImage && (
+                <div className="flex flex-col gap-1">
+                  <p className="text-[9px] font-bold uppercase tracking-widest text-white/40 px-1">Reference</p>
+                  <div className="aspect-video relative rounded-lg overflow-hidden border border-white/5">
+                    <img src={masterImage} alt="Reference" className="w-full h-full object-cover grayscale opacity-50" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+                    <div className="absolute bottom-1 left-1 flex items-center gap-1">
+                      <ShieldCheck className="size-2.5 text-[#2dd4bf]" />
+                      <span className="text-[8px] font-bold text-white/60 uppercase">Locked</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+              {currentSnapshot && (
+                <div className="flex flex-col gap-1">
+                  <p className="text-[9px] font-bold uppercase tracking-widest text-white/40 px-1">Last Scan</p>
+                  <div className="aspect-video relative rounded-lg overflow-hidden border border-white/5">
+                    <img src={currentSnapshot} alt="Last scan" className="w-full h-full object-cover grayscale opacity-50" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+                    <div className="absolute bottom-1 left-1">
+                      <span className="text-[8px] font-bold text-white/60 uppercase">Live</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
           </Card>
         )}
       </div>

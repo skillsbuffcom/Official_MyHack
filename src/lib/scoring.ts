@@ -1,3 +1,24 @@
+/**
+ * VeriPro Deterministic Scoring Engine
+ * Implements PRD Section 6: (T * 0.5) + (S * 0.3) + (Q * 0.2)
+ */
+
+export interface ScoringInput {
+  technicalScore: number; // T: From Gemini criteria
+  safetyLevelCounts: { SAFE: number; CAUTION: number; UNSAFE: number; UNASSESSABLE: number };
+  qualityRatingCounts: { GOOD: number; ACCEPTABLE: number; POOR: number; unclear: number };
+}
+
+export interface ScoringResult {
+  compositeScore: number;
+  technicalScore: number;
+  safetyScore: number;
+  workQualityScore: number;
+  grade: string;
+  hireSignal: string;
+  safetyCapped: boolean;
+}
+
 export function frameSafetyScore(level: string): number {
   if (level === "SAFE") return 100;
   if (level === "CAUTION") return 40;   // tightened — minor hazard still meaningfully penalised
@@ -6,11 +27,11 @@ export function frameSafetyScore(level: string): number {
   return 45; // UNASSESSABLE
 }
 
-export function frameQualityScore(rating: string | null | undefined): number {
+export function frameQualityScore(rating: string): number {
   if (rating === "GOOD") return 100;
   if (rating === "ACCEPTABLE") return 70;
   if (rating === "POOR") return 30;
-  return 70;
+  return 70; // unclear
 }
 
 // Employer score: derived from Gemini verdict + how many qualifying actions were observed

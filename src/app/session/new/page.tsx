@@ -1,7 +1,7 @@
 "use client";
 import { Suspense, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { Loader2, AlertCircle } from "lucide-react";
+import { Loader2, AlertCircle, Zap } from "lucide-react";
 
 function NewSessionContent() {
   const params = useSearchParams();
@@ -130,14 +130,47 @@ function NewSessionContent() {
             </div>
           )}
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-teal-500 hover:bg-teal-400 disabled:opacity-50 text-gray-950 font-semibold py-3 rounded-lg transition-colors flex items-center justify-center gap-2"
-          >
-            {loading && <Loader2 className="w-4 h-4 animate-spin" />}
-            Continue to Biometric Registration →
-          </button>
+          <div className="flex flex-col gap-3">
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-teal-500 hover:bg-teal-400 disabled:opacity-50 text-gray-950 font-semibold py-3 rounded-lg transition-colors flex items-center justify-center gap-2"
+            >
+              {loading && <Loader2 className="w-4 h-4 animate-spin" />}
+              Continue to Biometric Registration →
+            </button>
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => {
+                setWorkerName("Demo Candidate");
+                setIcNumber("DEMO-12345");
+                setTaskClaim("Basic Terminal Block Wiring Demonstration");
+                // The form state update is async, so we use the values directly for the submit
+                setLoading(true);
+                fetch("/api/session/start", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    workerName: "Demo Candidate",
+                    icNumber: "DEMO-12345",
+                    taskClaim: "Basic Terminal Block Wiring Demonstration",
+                    trade: "ELECTRICAL_WIRING",
+                    jobPostingId: jobPostingId || "demo-bypass",
+                    roleTargeted: roleFromBrief || "Electrical Engineer basic",
+                  }),
+                }).then(async res => {
+                  const data = await res.json();
+                  if (res.ok) router.push(`/session/${data.sessionId}/verify`);
+                  else setError("Demo deployment failed.");
+                }).catch(() => setError("Network error."));
+              }}
+              className="w-full border border-amber-500/50 hover:bg-amber-500/10 text-amber-500 font-semibold py-3 rounded-lg transition-colors flex items-center justify-center gap-2"
+            >
+              <Zap className="w-4 h-4" />
+              Quick Start (Demo Bypass)
+            </button>
+          </div>
         </form>
       </div>
     </div>

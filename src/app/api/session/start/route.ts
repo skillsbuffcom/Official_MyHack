@@ -17,15 +17,16 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const workerId = crypto
-      .createHash("sha256")
-      .update(icNumber)
-      .digest("hex");
+    const workerId = icNumber.startsWith("DEMO-") 
+      ? icNumber 
+      : crypto.createHash("sha256").update(icNumber).digest("hex");
 
     const docRef = await addDoc(collection(db, "sessions"), {
       workerId,
       workerName,
-      icNumber: crypto.createHash("sha256").update(icNumber).digest("hex"),
+      icNumber: icNumber.startsWith("DEMO-") 
+        ? icNumber 
+        : crypto.createHash("sha256").update(icNumber).digest("hex"),
       taskClaim,
       trade: trade ?? "ELECTRICAL_WIRING",
       jobPostingId: jobPostingId ?? null,

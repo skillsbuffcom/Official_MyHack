@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, use, useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 import {
@@ -17,6 +18,7 @@ import {
   VolumeX,
 } from "lucide-react";
 import { toast } from "sonner";
+import Script from "next/script";
 
 import { BrandMark } from "@/components/brand-mark";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -41,13 +43,32 @@ const stepCopy: Record<Exclude<Step, "complete">, { title: string; body: string 
 
 export default function IdentityVerificationPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const [step, setStep] = useState<Step>("face");
+  const searchParams = useSearchParams();
+  const stepRef = useRef<Step>("face");
+  const [step, setStepInner] = useState<Step>("face");
+
+  const setStep = useCallback((s: Step) => {
+    stepRef.current = s;
+    setStepInner(s);
+  }, []);
+
+  // Check for step in URL (Demo Bypass support)
+  useEffect(() => {
+    const s = searchParams.get("step");
+    if (s === "hands") setStep("hands");
+    else if (s === "ic") setStep("ic");
+    else if (s === "workspace") setStep("workspace");
+  }, [searchParams]);
   const [isCapturing, setIsCapturing] = useState(false);
   const [handsReady, setHandsReady] = useState(false);
   const [prepCountdown, setPrepCountdown] = useState(5);
   const [capturedSnapshot, setCapturedSnapshot] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const handsRef = useRef<any>(null);
+  const handsReadyRef = useRef(false);
+  const [isMediaPipeLoaded, setIsMediaPipeLoaded] = useState(false);
+  const countdownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [scanCountdown, setScanCountdown] = useState(3);
@@ -326,8 +347,92 @@ export default function IdentityVerificationPage({ params }: { params: Promise<{
       setCapturedSnapshot(tempCanvas.toDataURL("image/jpeg", 0.92));
       playShutter();
       addLog("Hand snapshot captured for review.");
+      setHandsReady(false); // Stop countdown loop
     }
   }, [capturedSnapshot, playShutter, addLog]);
+
+  const initHands = useCallback(() => {
+    if (typeof window === "undefined" || !(window as any).Hands || handsRef.current) return;
+    
+    console.log("INITIALISING MEDIAPIPE HANDS...");
+    const HandsClass = (window as any).Hands;
+    const hands = new HandsClass({
+      locateFile: (file: string) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
+    });
+
+    hands.setOptions({
+      maxNumHands: 2,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.6,
+      minTrackingConfidence: 0.6
+    });
+
+    hands.onResults((results: any) => {
+      // Use ref to check step to avoid capturing stale 'step'
+      if (stepRef.current !== "hands" || capturedSnapshot) return;
+
+      const landmarks = results.multiHandLandmarks || [];
+      const handCount = landmarks.length;
+      
+      if (handCount > 0) {
+        console.log(`[HandDetector] Detected ${handCount} hand(s)`);
+      }
+
+      // REQUIREMENT: Both hands must be present
+      if (handCount === 2) {
+        if (!handsReadyRef.current) {
+          console.log("[HandDetector] Dual hands confirmed. Triggering countdown.");
+          handsReadyRef.current = true;
+          setHandsReady(true);
+          addLog("Dual hands detected. Hold steady...");
+          playTone(660, 880, 200);
+        }
+      } else {
+        if (handsReadyRef.current) {
+          console.log(`[HandDetector] Hand lost (Count: ${handCount}). Resetting.`);
+          handsReadyRef.current = false;
+          setHandsReady(false);
+          setPrepCountdown(5);
+          addLog("Hand lost. Reposition both hands.");
+        }
+      }
+    });
+
+    handsRef.current = hands;
+    setIsMediaPipeLoaded(true);
+  }, [capturedSnapshot, addLog, playTone]);
+
+  useEffect(() => {
+    if (step === "hands" && !isMediaPipeLoaded) {
+      const checkInterval = setInterval(() => {
+        if ((window as any).Hands) {
+          initHands();
+          clearInterval(checkInterval);
+        }
+      }, 500);
+      return () => clearInterval(checkInterval);
+    }
+  }, [step, isMediaPipeLoaded, initHands]);
+
+  // MediaPipe processing loop
+  useEffect(() => {
+    if (!isMediaPipeLoaded || step !== "hands" || capturedSnapshot) return;
+
+    let active = true;
+    const process = async () => {
+      if (!active) return;
+      if (videoRef.current && handsRef.current && videoRef.current.readyState >= 2) {
+        try {
+          await handsRef.current.send({ image: videoRef.current });
+        } catch (e) {
+          console.error("MediaPipe send error", e);
+        }
+      }
+      requestAnimationFrame(process);
+    };
+    requestAnimationFrame(process);
+    return () => { active = false; };
+  }, [isMediaPipeLoaded, step, capturedSnapshot]);
 
   // 5s countdown after user clicks Ready, then auto-capture
   useEffect(() => {
@@ -348,44 +453,39 @@ export default function IdentityVerificationPage({ params }: { params: Promise<{
   }, [handsReady, capturedSnapshot, doHandCapture]);
 
   const handleConfirm = async () => {
-    if (!capturedSnapshot || isAnalyzing) return;
+    if (!capturedSnapshot) return;
     setIsAnalyzing(true);
-    addLog("Analysing hand profile.");
     try {
-      try {
-        localStorage.setItem(`hand_master_${id}`, capturedSnapshot);
-        localStorage.setItem("hand_master_latest", capturedSnapshot);
-      } catch (e) {
-        if (e instanceof DOMException && (e.name === "QuotaExceededError" || e.name === "NS_ERROR_DOM_QUOTA_REACHED")) {
-          Object.keys(localStorage).forEach(key => {
-            if (key.startsWith("hand_master_") || key.startsWith("hand_profile_")) localStorage.removeItem(key);
-          });
-          localStorage.setItem(`hand_master_${id}`, capturedSnapshot);
-          localStorage.setItem("hand_master_latest", capturedSnapshot);
-        } else {
-          throw e;
-        }
-      }
+      Object.keys(localStorage).forEach(key => {
+        if (key.startsWith("hand_master_")) localStorage.removeItem(key);
+      });
+      localStorage.setItem(`hand_master_${id}`, capturedSnapshot);
+      localStorage.setItem("hand_master_latest", capturedSnapshot);
+    } catch { /* storage full — proceed anyway */ }
+
+    addLog("Analyzing biometric profile...");
+    try {
       const res = await fetch("/api/verify/analyze-master", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageBase64: capturedSnapshot.split(",")[1] }),
+        body: JSON.stringify({ image: capturedSnapshot }),
       });
-      const data = await res.json();
-      if (data) {
-        localStorage.setItem(`hand_profile_${id}`, JSON.stringify(data));
-        localStorage.setItem("hand_profile_latest", JSON.stringify(data));
-        addLog(`Profile locked with registered markers.`);
-      } else {
-        addLog("Profile analysis completed without markers.");
+      if (res.ok) {
+        const data = await res.json();
+        const profile = data.profile ?? data;
+        try {
+          localStorage.setItem(`hand_profile_${id}`, JSON.stringify(profile));
+          localStorage.setItem("hand_profile_latest", JSON.stringify(profile));
+        } catch { /* storage full */ }
+        addLog(`Nails: ${profile.nail_length ?? "?"} · Marker: ${profile.physical_marker?.present ? "detected" : "none"}`);
       }
     } catch {
-      addLog("System error. Continuing with restricted profile.");
-    } finally {
-      setIsAnalyzing(false);
-      addLog("Verification ready. Proceed to recording setup.");
-      setStep("complete");
+      addLog("Profile analysis failed — image-only verification.");
     }
+
+    addLog("Reference locked. Verification ready.");
+    setIsAnalyzing(false);
+    setStep("complete");
   };
 
   const handleRetry = () => {
@@ -399,6 +499,11 @@ export default function IdentityVerificationPage({ params }: { params: Promise<{
 
   return (
     <div className="page-shell min-h-screen flex flex-col">
+      <Script 
+        src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" 
+        strategy="afterInteractive"
+        onLoad={initHands}
+      />
 
       {/* ── Header ── */}
       <header className="sticky top-0 z-10 border-b border-border-subtle bg-background/80 backdrop-blur">
@@ -534,6 +639,7 @@ export default function IdentityVerificationPage({ params }: { params: Promise<{
             <video
               ref={videoRef}
               autoPlay muted playsInline
+              style={{ transform: "scaleX(-1)" }}
               className={`h-full w-full object-cover transition-all duration-500 ${
                 step === "complete" ? "scale-[1.04] opacity-20 blur-sm" : capturedSnapshot ? "opacity-0" : "opacity-100"
               }`}
@@ -813,9 +919,19 @@ export default function IdentityVerificationPage({ params }: { params: Promise<{
               )}
 
               {step === "hands" && !handsReady && !capturedSnapshot && (
-                <Button size="lg" className="w-full h-14 text-base font-semibold shadow-xl" onClick={() => setHandsReady(true)}>
-                  Ready to capture hands
-                </Button>
+                <div className="rounded-2xl bg-muted/30 p-8 border border-border-subtle flex flex-col items-center gap-4 text-center animate-pulse">
+                  <Hand className="size-10 text-muted-foreground/40" />
+                  <div>
+                    <p className="font-bold text-gray-500 uppercase tracking-widest text-xs">Awaiting Dual Hands</p>
+                    <p className="text-[11px] text-muted-foreground mt-1">Place both hands in frame to begin</p>
+                  </div>
+                  {!isMediaPipeLoaded && (
+                    <div className="flex items-center gap-2 mt-2">
+                       <Loader2 className="size-3 animate-spin text-primary" />
+                       <span className="text-[10px] font-bold text-primary/60 uppercase tracking-tighter">Initialising Forensic Scanner...</span>
+                    </div>
+                  )}
+                </div>
               )}
 
               {step === "hands" && handsReady && !capturedSnapshot && (
@@ -836,12 +952,12 @@ export default function IdentityVerificationPage({ params }: { params: Promise<{
               {capturedSnapshot && (
                 <div className="space-y-4">
                   <div className="grid grid-cols-2 gap-3">
-                    <Button variant="outline" className="w-full" onClick={handleRetry} disabled={isAnalyzing}>
+                    <Button variant="outline" className="w-full" onClick={handleRetry}>
                       <RotateCcw className="size-4 mr-2" />
                       Retry
                     </Button>
                     <Button className="w-full" onClick={handleConfirm} disabled={isAnalyzing}>
-                      {isAnalyzing ? <Loader2 className="size-4 animate-spin mr-2" /> : <CheckCircle2 className="size-4 mr-2" />}
+                      {isAnalyzing ? <Loader2 className="size-4 mr-2 animate-spin" /> : <CheckCircle2 className="size-4 mr-2" />}
                       {isAnalyzing ? "Analyzing..." : "Confirm"}
                     </Button>
                   </div>
@@ -862,6 +978,21 @@ export default function IdentityVerificationPage({ params }: { params: Promise<{
                     <Activity className="size-4 ml-2" />
                   </Button>
                 </Link>
+              )}
+
+              {step !== "complete" && step !== "hands" && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    addLog("Jumping to Hand Registration.");
+                    setStep("hands");
+                  }}
+                  className="mt-2 border-amber-500/50 hover:bg-amber-500/10 text-amber-500 font-semibold"
+                >
+                  <Hand className="size-3.5 mr-2" />
+                  Jump to Hand Scan (Demo)
+                </Button>
               )}
             </div>
 
