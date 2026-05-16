@@ -1,7 +1,8 @@
 "use client";
 import { useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { Upload, FileImage, Loader2, AlertCircle, ChevronLeft } from "lucide-react";
+import { Upload, FileImage, Loader2, AlertCircle, ChevronLeft, Zap } from "lucide-react";
+import { toast } from "sonner";
 import Link from "next/link";
 import { BrandMark } from "@/components/brand-mark";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -131,7 +132,6 @@ export default function IntakePage() {
           </p>
         </div>
 
-        {/* Duration Selector - Integrated from HEAD and styled for Luxury UI */}
         <div className="mb-10 p-8 bg-card backdrop-blur-md border border-border rounded-[2.5rem] shadow-lg">
           <label className="block text-[10px] font-bold uppercase tracking-[0.2em] text-muted-foreground mb-4 ml-1">Complexity & Target Duration</label>
           <div className="grid grid-cols-3 gap-4">
@@ -265,6 +265,16 @@ export default function IntakePage() {
               >
                 Return to upload
               </button>
+            </div>
+            <div className="pt-8 border-t border-gray-100 flex flex-col items-center gap-4">
+               <button
+                onClick={() => router.push("/intake/brief?id=demo-bypass")}
+                className="text-xs font-bold uppercase tracking-[0.2em] text-purple-400 hover:text-purple-600 transition-colors flex items-center gap-2"
+              >
+                <Zap className="size-3" />
+                Quick Demo (Bypass)
+              </button>
+              <p className="text-[10px] text-gray-400 font-medium tracking-tight">For evaluation and demonstration purposes only.</p>
             </div>
           </form>
         )}

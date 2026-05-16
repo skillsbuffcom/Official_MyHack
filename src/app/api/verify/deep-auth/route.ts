@@ -5,6 +5,76 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+type NailLength = "very_short" | "short" | "medium" | "long" | "very_long";
+
+type RegisteredMarker = {
+  type?: string;
+  hand?: string;
+  location?: string;
+  description?: string;
+  confidence?: number;
+};
+
+type MarkerAudit = RegisteredMarker & {
+  area_visible: boolean;
+  confirmed: boolean;
+  confidence: number;
+  exact_visual_match?: boolean;
+  notes: string;
+};
+
+type DeepAuthResponse = {
+  hand_visibility?: {
+    hands_visible?: "none" | "one" | "both";
+    palm_or_back?: string;
+    confidence?: number;
+  };
+  same_hand_structure?: {
+    verdict?: "same" | "different" | "uncertain";
+    confidence?: number;
+    differences?: string[];
+  };
+  nail_length?: NailLength;
+  nail_comparison?: {
+    verdict?: "same" | "different" | "uncertain";
+    confidence?: number;
+    registered?: NailLength;
+    observed?: NailLength;
+    notes?: string;
+  };
+  marker_audit?: MarkerAudit[];
+  accessories?: {
+    registered?: string;
+    observed?: string;
+    changed?: boolean;
+  };
+  identity_verdict?: {
+    verdict?: "same" | "different" | "uncertain";
+    confidence?: number;
+    reason?: string;
+  };
+  summary?: string;
+};
+
+type IndependentMarkerCheck = {
+  visible_markers?: {
+    type?: string;
+    hand?: string;
+    location?: string;
+    description?: string;
+    confidence?: number;
+  }[];
+};
+
+type MarkerDecision = {
+  type?: string;
+  location?: string;
+  status: "confirmed" | "missing" | "uncertain";
+  comparisonConfirmed: boolean;
+  independentConfirmed: boolean;
+  confidence: number;
+};
+
 async function callGeminiWithRetry(
   model: ReturnType<typeof genAI.getGenerativeModel>,
   parts: Parameters<typeof model.generateContent>[0],
@@ -23,174 +93,364 @@ async function callGeminiWithRetry(
   throw new Error("Unreachable");
 }
 
-const NAIL_SCALE: Record<string, number> = {
-  very_short: 0, short: 1, medium: 2, long: 3, very_long: 4,
+const NAIL_SCALE: Record<NailLength, number> = {
+  very_short: 0,
+  short: 1,
+  medium: 2,
+  long: 3,
+  very_long: 4,
 };
+
+const NAIL_VALUES = Object.keys(NAIL_SCALE) as NailLength[];
+
+function cleanJson(text: string) {
+  return text
+    .trim()
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/```\s*$/i, "")
+    .trim();
+}
+
+function parseProfile(masterProfile: unknown) {
+  if (!masterProfile) return null;
+  try {
+    return typeof masterProfile === "string" ? JSON.parse(masterProfile) : masterProfile;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeNail(value: unknown): NailLength | null {
+  const normalized = String(value ?? "").toLowerCase().trim().replace(/\s+/g, "_");
+  return NAIL_VALUES.includes(normalized as NailLength) ? normalized as NailLength : null;
+}
+
+function getRegisteredMarkers(profile: any): RegisteredMarker[] {
+  const markers = Array.isArray(profile?.physical_markers) ? profile.physical_markers : [];
+  const legacy = profile?.physical_marker?.present ? [profile.physical_marker] : [];
+  return [...markers, ...legacy].filter((marker) => {
+    const confidence = Number(marker?.confidence ?? 1);
+    const type = String(marker?.type ?? "").toLowerCase();
+    const location = String(marker?.location ?? "").toLowerCase();
+    const threshold = ["mole", "scar", "birthmark", "tattoo"].includes(type) ? 0.68 : 0.8;
+    return confidence >= threshold && type && location && type !== "none" && location !== "none";
+  }).slice(0, 1);
+}
+
+function nailDiff(a: NailLength | null, b: NailLength | null) {
+  if (!a || !b) return 0;
+  return Math.abs(NAIL_SCALE[a] - NAIL_SCALE[b]);
+}
+
+function hasIndependentMarkerMatch(marker: RegisteredMarker, observedMarkers: NonNullable<IndependentMarkerCheck["visible_markers"]>) {
+  const markerType = String(marker.type ?? "").toLowerCase();
+  const markerLocation = String(marker.location ?? "").toLowerCase();
+  // Only filter directional/relative words — keep anatomical words (hand, finger, knuckle, back, palm, etc.)
+  const weakLocationWords = new Set(["left", "right", "approximately", "midway", "between", "first", "second"]);
+  const markerWords = markerLocation
+    .split(/[^a-z0-9]+/)
+    .filter(word => word.length >= 4 && !weakLocationWords.has(word));
+  const compatibleTypes = markerType === "mole" ? ["mole", "freckle"] : [markerType];
+
+  return observedMarkers.some((observed) => {
+    const observedType = String(observed.type ?? "").toLowerCase();
+    const observedLocation = String(observed.location ?? "").toLowerCase();
+    const observedDescription = String(observed.description ?? "").toLowerCase();
+    const confidence = Number(observed.confidence ?? 0);
+    const typeMatches = compatibleTypes.some(type => observedType === type || observedType.includes(type));
+    if (!typeMatches || confidence < 0.72) return false;
+    // No specific location words: require very high confidence to pass without location
+    if (markerWords.length === 0) return confidence >= 0.88;
+    // Has specific location words: require a word match at the location
+    return markerWords.some(word => observedLocation.includes(word) || observedDescription.includes(word));
+  });
+}
 
 export async function POST(req: Request) {
   try {
-    const { currentImage, masterImage, masterProfile } = await req.json();
+    const { currentImage, masterImage, masterProfile, currentColorImage, masterColorImage, currentHandCrops } = await req.json();
     if (!currentImage) {
       return NextResponse.json({ error: "Missing image" }, { status: 400 });
     }
 
     const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    const profile = parseProfile(masterProfile) as any;
+    const regNail = normalizeNail(profile?.nail_length);
+    const regMarkers = getRegisteredMarkers(profile);
 
-    const parsed = (() => {
-      if (!masterProfile) return null;
-      try {
-        return typeof masterProfile === "string" ? JSON.parse(masterProfile) : masterProfile;
-      } catch { return null; }
-    })();
-
-    const regNail: string | null = parsed?.nail_length ?? null;
-    const regMarker = parsed?.physical_marker?.present ? parsed.physical_marker : null;
-
-    console.log("DEEP AUTH — regNail:", regNail, "| regMarker:", regMarker?.type ?? "none");
+    console.log("DEEP AUTH - regNail:", regNail, "| regMarkers:", regMarkers.length);
 
     if (masterImage) {
-      const markHint = regMarker
-        ? `\nIMPORTANT: The registered person (IMAGE 1) has a ${regMarker.type}${regMarker.location ? ` at ${regMarker.location}` : ""}${regMarker.description ? ` — ${regMarker.description}` : ""}. This is a PERMANENT mark. Look for it at this exact location in IMAGE 2.`
-        : "";
+      const markerText = regMarkers.length
+        ? regMarkers.map((m, i) => `${i}. ${m.type ?? "mark"} on ${m.hand ?? "unknown hand"} at ${m.location ?? "unknown location"}; ${m.description ?? "no description"}`).join("\n")
+        : "none";
+      const currentCropParts = Array.isArray(currentHandCrops)
+        ? currentHandCrops.slice(0, 2).flatMap((crop: string, index: number) => [
+            { inlineData: { data: crop.split(",")[1], mimeType: "image/jpeg" } },
+            { text: `IMAGE 2 ZOOMED HAND CROP ${index + 1} - inspect this crop closely for the registered mole/marker.` },
+          ])
+        : [];
 
-      const comparePrompt = `You are a strict biometric security system. Your job is to find differences between two hand images — not to confirm similarity. Default to NO when uncertain.
+      const prompt = `You are a strict but fair biometric hand verifier.
 
-NOTE: Both images have been processed with a green-channel filter — they appear greenish/monochrome. This enhances skin texture and surface markers but also makes shadows and skin creases more visible. Do NOT mistake shadows, knuckle creases, wrinkles, or normal skin texture for permanent marks.
+Compare IMAGE 1 (registered reference) and IMAGE 2 (current scan). The worker must show BOTH hands. Focus on:
+- persistent skin markers such as moles, freckles, scars, birthmarks, tattoos, cuts, calluses
+- nail length differences across multiple fingers
+- overall hand structure differences such as finger width, finger proportions, nail bed shape, knuckles, wrist shape
 
-IMAGE 1: REGISTERED REFERENCE (captured at session start)
-IMAGE 2: CURRENT SCAN (captured now)
-${markHint}
+Important security rule: if IMAGE 1 has a registered mole/marker, IMAGE 2 must show the same marker at the same location. Do not confirm a mark just because there is any dark spot, crease, shadow, glare, nail edge, knuckle fold, or compression artifact near that area. Confirm only when the mark in IMAGE 2 matches the registered marker's exact location, type, approximate size, shape, and color/tone. If the match is not visually exact, set confirmed=false and exact_visual_match=false. Use confidence >= 0.90 only for an unmistakable exact match; otherwise use confidence <= 0.60.
 
-Answer each line exactly as shown.
+Registered nail length: ${regNail ?? "unknown"}
+Registered markers:
+${markerText}
+If registered markers is "none", return an empty marker_audit array.
 
-HAND: Is at least one hand clearly visible in IMAGE 2? YES or NO.
-NAIL: Nail length in IMAGE 2 only? very_short / short / medium / long / very_long
-  very_short = flat at fingertip  |  short = 1mm past  |  medium = 2-4mm past  |  long = 5-8mm past  |  very_long = 9mm+
-NAILCOMP: Do the nails in IMAGE 2 appear a different length from IMAGE 1 — either clearly longer OR clearly shorter? Compare across multiple fingers. Do not excuse differences as pose or angle. YES or NO.
-MARKS: List only clearly distinct, permanent marks on IMAGE 2 — moles (raised or flat dark spots), scars, cuts, birthmarks, tattoos. Do NOT list shadows, skin creases, knuckle pigmentation, wrinkles, or normal skin texture. Each mark: type and exact location. If none clearly present, write: none.${markHint ? `\nREGMARK: A registered mark is described above. Look ONLY at the exact location specified. Is there a clearly visible mark of the same type at that precise location in IMAGE 2? Do not confirm based on a mark in a different location. If you are not certain it is the same mark at the same spot, answer NO. YES or NO.` : ""}
-ACCESSORIES: Every ring, watch, bracelet, or hand/wrist accessory visible in IMAGE 2. If none, write: none.
-MACCESSORIES: Every ring, watch, bracelet, or hand/wrist accessory visible in IMAGE 1. If none, write: none.
-COMPARE: Compare IMAGE 1 and IMAGE 2. Your job is to find differences, not confirm similarity.
-(1) Finger thickness and proportions — the most reliable indicator. Noticeably wider, thicker, or differently shaped fingers = NO.
-(2) Nail length — directly compare across all fingers. Clearly different length = NO.
-(3) Skin tone — only flag if the difference is extreme and cannot be explained by lighting.
-(4) Registered marks — if a mark is present in IMAGE 1 but clearly absent in IMAGE 2, answer NO.
-Answer YES only if the hands could plausibly belong to the same person. Otherwise NO. YES or NO.`;
+Respond ONLY with valid JSON matching this shape:
+{
+  "hand_visibility": {
+    "hands_visible": "none|one|both",
+    "palm_or_back": "short description of visible hand side/orientation",
+    "confidence": 0.0
+  },
+  "same_hand_structure": {
+    "verdict": "same|different|uncertain",
+    "confidence": 0.0,
+    "differences": ["specific visible structural differences, or empty"]
+  },
+  "nail_length": "very_short|short|medium|long|very_long",
+  "nail_comparison": {
+    "verdict": "same|different|uncertain",
+    "confidence": 0.0,
+    "registered": "${regNail ?? "very_short"}",
+    "observed": "very_short|short|medium|long|very_long",
+    "notes": "specific fingers compared"
+  },
+  "marker_audit": [
+    {
+      "type": "registered marker type",
+      "hand": "left|right|unknown",
+      "location": "registered marker location",
+      "description": "registered marker description",
+      "area_visible": true,
+      "confirmed": true,
+      "exact_visual_match": true,
+      "confidence": 0.0,
+      "notes": "state the exact size/shape/color/location evidence, or explain why it is likely a crease/shadow/artifact"
+    }
+  ],
+  "accessories": {
+    "registered": "rings/watches/bracelets in IMAGE 1 or none",
+    "observed": "rings/watches/bracelets in IMAGE 2 or none",
+    "changed": false
+  },
+  "identity_verdict": {
+    "verdict": "same|different|uncertain",
+    "confidence": 0.0,
+    "reason": "strict same-person judgment based on markers, nails, and hand structure"
+  },
+  "summary": "one concise reason for the verdict"
+}`;
 
-      const result = await callGeminiWithRetry(model, [
-        { inlineData: { data: masterImage.split(",")[1], mimeType: "image/jpeg" } },
-        { text: "IMAGE 1 — REGISTERED REFERENCE:" },
-        { inlineData: { data: currentImage.split(",")[1], mimeType: "image/jpeg" } },
-        { text: "IMAGE 2 — CURRENT SCAN:\n\n" + comparePrompt },
+      const parts = [
+        { inlineData: { data: (masterColorImage ?? masterImage).split(",")[1], mimeType: "image/jpeg" } },
+        { text: "IMAGE 1 - REGISTERED REFERENCE" },
+        { inlineData: { data: (currentColorImage ?? currentImage).split(",")[1], mimeType: "image/jpeg" } },
+        { text: "IMAGE 2 - CURRENT SCAN" },
+        ...currentCropParts,
+        { text: prompt },
+      ] as Parameters<typeof model.generateContent>[0];
+
+      const independentMarkersPromise = (async (): Promise<NonNullable<IndependentMarkerCheck["visible_markers"]>> => {
+        if (regMarkers.length === 0) return [];
+
+        const independentPrompt = `Look at this hand image by itself. You are NOT comparing to a reference.
+List only clearly visible persistent physical markers on the hands, such as a real mole, freckle, scar, birthmark, tattoo, cut, or callus.
+Do not infer or guess. Ignore pores, wrinkles, knuckle folds, shadows, glare, compression artifacts, and vague discoloration.
+If no real marker is plainly visible, return an empty visible_markers array.
+Respond ONLY with valid JSON:
+{
+  "visible_markers": [
+    {
+      "type": "mole|freckle|scar|birthmark|tattoo|cut|callus|other",
+      "hand": "left|right|unknown",
+      "location": "precise location",
+      "description": "size, shape, and color/tone",
+      "confidence": 0.0
+    }
+  ]
+}`;
+
+        try {
+          const independentResult = await callGeminiWithRetry(model, [
+            { inlineData: { data: (currentColorImage ?? currentImage).split(",")[1], mimeType: "image/jpeg" } },
+            ...currentCropParts,
+            independentPrompt,
+          ] as Parameters<typeof model.generateContent>[0]);
+          const independentText = independentResult.response.text().trim();
+          const independentAudit = JSON.parse(cleanJson(independentText)) as IndependentMarkerCheck;
+          return Array.isArray(independentAudit.visible_markers) ? independentAudit.visible_markers : [];
+        } catch (error) {
+          console.warn("Independent marker check failed:", error);
+          return [];
+        }
+      })();
+
+      const [result, independentMarkers] = await Promise.all([
+        callGeminiWithRetry(model, parts),
+        independentMarkersPromise,
       ]);
-
       const text = result.response.text().trim();
-      console.log("COMPARE RESPONSE:\n", text);
+      console.log("RESPONSE:\n", text);
+      console.log("INDEPENDENT MARKERS:", independentMarkers);
 
-      const getLine = (key: string) =>
-        new RegExp(`^${key}:\\s*(.+)$`, "im").exec(text)?.[1]?.trim() ?? null;
+      let audit: DeepAuthResponse;
+      try {
+        audit = JSON.parse(cleanJson(text)) as DeepAuthResponse;
+      } catch {
+        return NextResponse.json({
+          result: "ERROR",
+          reason: "Biometric verifier returned invalid JSON.",
+          flags: ["verifier_parse_error"],
+          raw: text,
+        });
+      }
 
-      const hand = getLine("HAND")?.toUpperCase();
-      const obsNailRaw = getLine("NAIL")?.toLowerCase().replace(/\s+/g, "_") ?? null;
-      const obsNail = obsNailRaw && obsNailRaw in NAIL_SCALE ? obsNailRaw : null;
-      const nailComp = getLine("NAILCOMP")?.toUpperCase() ?? null;
-      const obsMarks = getLine("MARKS") ?? "none";
-      const compareAnswer = getLine("COMPARE")?.toUpperCase() ?? null;
-      const regMarkAnswer = regMarker ? (getLine("REGMARK")?.toUpperCase() ?? null) : null;
-      const obsAccessories = getLine("ACCESSORIES")?.toLowerCase() ?? "none";
-      const masterAccessories = getLine("MACCESSORIES")?.toLowerCase() ?? "none";
-      console.log("PARSED:", { hand, obsNail, nailComp, obsMarks, compareAnswer, regMarkAnswer, obsAccessories, masterAccessories });
+      const handsVisible = audit.hand_visibility?.hands_visible ?? "none";
+      const handConfidence = Number(audit.hand_visibility?.confidence ?? 0);
+      const observedNail = normalizeNail(audit.nail_comparison?.observed ?? audit.nail_length);
+      const nailVerdict = audit.nail_comparison?.verdict ?? "uncertain";
+      const nailConfidence = Number(audit.nail_comparison?.confidence ?? 0);
+      const structureVerdict = audit.same_hand_structure?.verdict ?? "uncertain";
+      const structureConfidence = Number(audit.same_hand_structure?.confidence ?? 0);
+      const markerResults = Array.isArray(audit.marker_audit) ? audit.marker_audit : [];
+      const identityVerdict = audit.identity_verdict?.verdict ?? "uncertain";
+      const identityConfidence = Number(audit.identity_verdict?.confidence ?? 0);
 
       const flags: string[] = [];
-      if (hand === "NO") flags.push("no_hand_visible");
-      // COMPARE is informational — logged but not a flag. Lighting, angle, and
-      // single-vs-two-hand composition differences make it unreliable as a hard check.
-      // NAILCOMP + REGMARK are the reliable anchors.
-      console.log("[COMPARE]", compareAnswer);
+      const warnings: string[] = [];
 
-      if (nailComp === "YES") {
-        flags.push(`nail_length_mismatch: nails in scan appear different length from registered reference (reg=${regNail ?? "?"}, obs=${obsNail ?? "?"})`);
+      if (handsVisible !== "both" || handConfidence < 0.55) {
+        flags.push(`both_hands_not_visible: observed=${handsVisible}`);
       }
 
-      if (regMarker && regMarkAnswer !== "YES") {
-        const reason = obsMarks.toLowerCase() === "none"
-          ? "scan shows no marks"
-          : regMarkAnswer === "NO"
-            ? "marks found but none match registered mark"
-            : "marker presence unconfirmed";
-        flags.push(`marker_not_confirmed: registered ${regMarker.type} — ${reason}`);
+      if (regNail && observedNail) {
+        const diff = nailDiff(regNail, observedNail);
+        if (diff >= 1) {
+          flags.push(`nail_length_mismatch: reg=${regNail}, obs=${observedNail}`);
+        } else if (nailVerdict === "uncertain") {
+          warnings.push(`nail_length_uncertain: reg=${regNail}, obs=${observedNail ?? "unknown"}`);
+        }
       }
 
-      const masterHasAccessories = masterAccessories !== "none";
-      const obsHasAccessories = obsAccessories !== "none";
-      if (!masterHasAccessories && obsHasAccessories) {
-        flags.push(`accessories_added: scan shows ${obsAccessories} — not present in registered reference`);
-      } else if (masterHasAccessories && !obsHasAccessories) {
-        flags.push(`accessories_removed: registered reference shows ${masterAccessories} — absent in scan`);
+      if (structureVerdict === "different" && structureConfidence >= 0.55) {
+        warnings.push(`hand_structure_mismatch: ${(audit.same_hand_structure?.differences ?? []).join("; ") || "visible structural differences"}`);
+      }
+
+      const markerDecisions: MarkerDecision[] = [];
+
+      regMarkers.forEach((registeredMarker, index) => {
+        const marker = markerResults[index];
+        const independentMatch = hasIndependentMarkerMatch(registeredMarker, independentMarkers);
+        if (!marker) {
+          markerDecisions.push({
+            type: registeredMarker.type,
+            location: registeredMarker.location,
+            status: independentMatch ? "confirmed" : "missing",
+            comparisonConfirmed: false,
+            independentConfirmed: independentMatch,
+            confidence: 0,
+          });
+          if (!independentMatch) flags.push(`marker_missing: ${registeredMarker.type ?? "marker"} at ${registeredMarker.location ?? "unknown location"} (not audited)`);
+          return;
+        }
+        const confidence = Number(marker.confidence ?? 0);
+        const comparisonMatch = Boolean(marker.confirmed) && confidence >= 0.6;
+        const markerPassed = comparisonMatch || independentMatch;
+        markerDecisions.push({
+          type: marker.type ?? registeredMarker.type,
+          location: marker.location ?? registeredMarker.location,
+          status: markerPassed ? "confirmed" : "missing",
+          comparisonConfirmed: comparisonMatch,
+          independentConfirmed: independentMatch,
+          confidence,
+        });
+
+        if (!markerPassed) {
+          flags.push(`marker_missing: ${marker.type ?? "marker"} at ${marker.location ?? "unknown location"}`);
+          return;
+        }
+        if (!comparisonMatch || !independentMatch) {
+          warnings.push(`marker_partially_confirmed: ${marker.type ?? "marker"} at ${marker.location ?? "unknown location"}`);
+        }
+      });
+
+      // When no marker is registered, identity verdict is the only biometric discriminator
+      if (regMarkers.length === 0) {
+        if (identityVerdict === "different" && identityConfidence >= 0.55) {
+          flags.push(`identity_verdict_different: ${audit.identity_verdict?.reason ?? "different hand appearance"}`);
+        } else if (identityVerdict !== "same") {
+          warnings.push(`no_marker_registered: identity verdict is ${identityVerdict} — register with a visible mole/scar for stronger verification`);
+        }
+      } else {
+        if (identityVerdict === "different" && identityConfidence >= 0.65) {
+          flags.push(`identity_verdict_different: ${audit.identity_verdict?.reason ?? "different hand appearance"}`);
+        } else if (identityVerdict === "different" && identityConfidence >= 0.50) {
+          warnings.push(`identity_verdict_different: ${audit.identity_verdict?.reason ?? "different hand appearance"}`);
+        }
+      }
+
+      if (audit.accessories?.changed) {
+        warnings.push(`accessories_changed: reg=${audit.accessories.registered ?? "none"}, obs=${audit.accessories.observed ?? "none"}`);
       }
 
       const isMismatch = flags.length > 0;
-      console.log("FLAGS:", flags, "| MISMATCH:", isMismatch);
+      console.log("FLAGS:", flags, "| WARNINGS:", warnings, "| MISMATCH:", isMismatch);
 
       return NextResponse.json({
         result: isMismatch ? "MISMATCH" : "MATCH",
-        reason: text.replace(/\n/g, " ").trim(),
+        reason: audit.summary ?? text.replace(/\n/g, " ").trim(),
         flags,
-        observed: { hand, nail: obsNail, marks: obsMarks, compare: compareAnswer, accessories: obsAccessories, regmark: regMarkAnswer },
+        warnings,
+        observed: {
+          hand: handsVisible === "both" ? "BOTH" : handsVisible === "one" ? "ONE" : "NO",
+          handConfidence,
+          nail: observedNail,
+          nailcomp: nailVerdict === "different" ? "YES" : nailVerdict === "same" ? "NO" : "UNCERTAIN",
+          nailConfidence,
+          structure: structureVerdict,
+          structureConfidence,
+          identity: identityVerdict,
+          identityConfidence,
+          markerResults: markerResults.slice(0, regMarkers.length),
+          markerDecisions,
+          independentMarkers,
+          accessories: audit.accessories?.observed ?? "none",
+        },
       });
     }
 
-    // Fallback: no master image — use profile text only
-    const regMarkLine = regMarker
-      ? `\nREGMARK: The registered person has a ${regMarker.type}${regMarker.description ? ` (${regMarker.description})` : ""} on their hand. Look at the marks you listed above in MARKS. Does any mark you listed match this — same type, same rough area of the hand, similar appearance? Answer YES if clear match, NO if not.`
-      : "";
-
-    const prompt = `Look carefully at the hands in this image. NOTE: This image has been processed with a green-channel filter — it will appear greenish/monochrome. This enhances vein patterns and surface markers. Do NOT comment on skin colour.
-
-Answer each line exactly as shown.
-
-HAND: Is at least one hand clearly visible? YES or NO.
-NAIL: How long are the nails? Pick one word only: very_short / short / medium / long / very_long
-  very_short = nails flat at or below the fingertip  |  short = 1mm past  |  medium = 2-4mm past  |  long = 5-8mm past  |  very_long = 9mm+
-MARKS: List every mole, scar, cut, bruise, or birthmark you can see anywhere on both hands with exact location. If none, write: none${regMarkLine}`;
-
     const result = await callGeminiWithRetry(model, [
       { inlineData: { data: currentImage.split(",")[1], mimeType: "image/jpeg" } },
-      prompt,
+      `Look at this image and answer with valid JSON only: {"hands_visible":"none|one|both","nail_length":"very_short|short|medium|long|very_long"}`,
     ]);
 
     const text = result.response.text().trim();
-    console.log("FALLBACK RESPONSE:\n", text);
-
-    const getLine = (key: string) =>
-      new RegExp(`^${key}:\\s*(.+)$`, "im").exec(text)?.[1]?.trim() ?? null;
-
-    const hand = getLine("HAND")?.toUpperCase();
-    const obsNailRaw = getLine("NAIL")?.toLowerCase().replace(/\s+/g, "_") ?? null;
-    const obsNail = obsNailRaw && obsNailRaw in NAIL_SCALE ? obsNailRaw : null;
-    const obsMarks = getLine("MARKS") ?? "none";
-    const regMarkAnswer = regMarker ? (getLine("REGMARK")?.toUpperCase() ?? null) : null;
+    const audit = JSON.parse(cleanJson(text)) as { hands_visible?: string; nail_length?: string };
+    const observedNail = normalizeNail(audit.nail_length);
 
     const flags: string[] = [];
-    if (hand === "NO") flags.push("no_hand_visible");
-    if (regNail && obsNail) {
-      const diff = Math.abs((NAIL_SCALE[obsNail] ?? 2) - (NAIL_SCALE[regNail] ?? 2));
-      if (diff >= 2) flags.push(`nail_mismatch: registered=${regNail}, observed=${obsNail}`);
+    if (audit.hands_visible !== "both") flags.push(`both_hands_not_visible: observed=${audit.hands_visible ?? "none"}`);
+    if (regNail && observedNail && nailDiff(regNail, observedNail) >= 1) {
+      flags.push(`nail_mismatch: registered=${regNail}, observed=${observedNail}`);
     }
-    if (regMarker && regMarkAnswer === "NO") {
-      flags.push(`marker_missing: registered ${regMarker.type} at ${regMarker.location} not found`);
-    }
-
-    const isMismatch = flags.length > 0;
-    console.log("FLAGS:", flags, "| MISMATCH:", isMismatch);
 
     return NextResponse.json({
-      result: isMismatch ? "MISMATCH" : "MATCH",
+      result: flags.length > 0 ? "MISMATCH" : "MATCH",
       reason: text.replace(/\n/g, " ").trim(),
       flags,
-      observed: { hand, nail: obsNail, marks: obsMarks, regmark: regMarkAnswer },
+      observed: { hand: audit.hands_visible === "both" ? "BOTH" : audit.hands_visible === "one" ? "ONE" : "NO", nail: observedNail },
     });
-
   } catch (error) {
     console.error("Deep auth error:", error);
     return NextResponse.json({ result: "ERROR", reason: String(error) });

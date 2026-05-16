@@ -36,6 +36,31 @@ interface Hands {
   send(input: { image: HTMLVideoElement }): Promise<void>;
   close(): void;
 }
+
+type HandLandmark = { x: number; y: number; z: number };
+
+function looksLikeBackhandPose(landmarks: HandLandmark[]) {
+  if (landmarks.length < 21) return false;
+
+  const dist = (a: HandLandmark, b: HandLandmark) => Math.hypot(a.x - b.x, a.y - b.y);
+  const fingersExtended = [
+    [8, 6],
+    [12, 10],
+    [16, 14],
+    [20, 18],
+  ].filter(([tip, pip]) => dist(landmarks[0], landmarks[tip]) > dist(landmarks[0], landmarks[pip]) * 1.08).length;
+
+  const xs = landmarks.map(p => p.x);
+  const ys = landmarks.map(p => p.y);
+  const width = Math.max(...xs) - Math.min(...xs);
+  const height = Math.max(...ys) - Math.min(...ys);
+
+  return fingersExtended >= 3 && width > 0.08 && height > 0.12;
+}
+
+function hasTwoBackhands(landmarkSets: HandLandmark[][]) {
+  return landmarkSets.length === 2 && landmarkSets.every(looksLikeBackhandPose);
+}
 export default function RecordSessionPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const [seconds, setSeconds] = useState(0);
@@ -47,15 +72,19 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
   const [scanBreakdown, setScanBreakdown] = useState<{ q: string; label: string; answer: string; flags: boolean }[] | null>(null);
 
   const [masterImage, setMasterImage] = useState<string | null>(null);
+  const [masterColorImage, setMasterColorImage] = useState<string | null>(null);
   const [masterProfile, setMasterProfile] = useState<string | null>(null);
   const [anchorLabels, setAnchorLabels] = useState<{ nail: string | null; marker: string | null }>({ nail: null, marker: null });
   const [currentSnapshot, setCurrentSnapshot] = useState<string | null>(null);
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      const img = localStorage.getItem(`hand_master_${id}`) ?? localStorage.getItem("hand_master_latest");
-      const profile = localStorage.getItem(`hand_profile_${id}`) ?? localStorage.getItem("hand_profile_latest");
+      const idStr = id as string;
+      const img = localStorage.getItem(`hand_master_${idStr}`) ?? localStorage.getItem("hand_master_latest");
+      const colorImg = localStorage.getItem(`hand_master_color_${idStr}`) ?? localStorage.getItem("hand_master_color_latest");
+      const profile = localStorage.getItem(`hand_profile_${idStr}`) ?? localStorage.getItem("hand_profile_latest");
       if (img) setMasterImage(img);
+      if (colorImg) setMasterColorImage(colorImg);
       if (profile) {
         setMasterProfile(profile);
         try {
@@ -64,7 +93,11 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
           const marker = parsed?.physical_marker?.present
             ? `${parsed.physical_marker.type} — ${parsed.physical_marker.location}`
             : null;
-          setAnchorLabels({ nail, marker });
+          const markers = (Array.isArray(parsed?.physical_markers) ? parsed.physical_markers : [])
+            .filter((m: { confidence?: unknown }) => Number(m.confidence ?? 1) >= 0.72)
+            .slice(0, 2);
+          const primaryMarker = markers[0] ?? (parsed?.physical_marker?.present ? parsed.physical_marker : null);
+          setAnchorLabels({ nail, marker: primaryMarker ? `${primaryMarker.type} - ${primaryMarker.location}` : marker });
         } catch { /* ignore */ }
       }
     }, 0);
@@ -80,8 +113,12 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
   const isFlaggedRef = useRef<boolean | null>(null);
   const reEntryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isDeepScanningRef = useRef(false);
+  const isCheckingHandPresenceRef = useRef(false);
   const noHandSinceRef = useRef<number | null>(null);
   const HAND_LOST_MS = 1500;
+  const VERIFY_HOLD_SECONDS = 4;
+  const VERIFY_HOLD_MS = 4100;
+  const VERIFY_COOLDOWN_MS = 12000;
   const [waitingForGesture, setWaitingForGesture] = useState(false);
   const [gestureCountdown, setGestureCountdown] = useState<number | null>(null);
   const waitingForGestureRef = useRef(false);
@@ -91,7 +128,8 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
   const gestureCountdownValueRef = useRef(0);
   const scanLifecycleRef = useRef(0);
   const scanAbortControllerRef = useRef<AbortController | null>(null);
-  const latestLandmarksRef = useRef<{ x: number; y: number; z: number }[] | null>(null);
+  const latestLandmarksRef = useRef<HandLandmark[][]>([]);
+  const lastBioScanAtRef = useRef(0);
   const reverifyIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Action log
@@ -100,6 +138,7 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
   const [isAnalyzingAction, setIsAnalyzingAction] = useState(false);
   const isAnalyzingActionRef = useRef(false);
   const actionIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const chunkIndexRef = useRef(0);
   const actionLogCounterRef = useRef(0);
   const actionLogScrollRef = useRef<HTMLDivElement>(null);
 
@@ -109,6 +148,15 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
 
   const addLog = useCallback((msg: string) => {
     console.log(`[AI]: ${msg}`);
+  }, []);
+
+  const resetGestureCountdown = useCallback(() => {
+    if (gestureFallbackRef.current) { clearTimeout(gestureFallbackRef.current); gestureFallbackRef.current = null; }
+    if (gestureCountdownTimerRef.current) { clearInterval(gestureCountdownTimerRef.current); gestureCountdownTimerRef.current = null; }
+    gestureHoldRef.current = null;
+    waitingForGestureRef.current = false;
+    setWaitingForGesture(false);
+    setGestureCountdown(null);
   }, []);
 
   const showBiometricToast = useCallback((variant: "success" | "error") => {
@@ -124,6 +172,70 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
     toast.success("Identity confirmed", { ...shared, description: "Bio-Auth passed. Hand identity locked." });
   }, []);
 
+  const capturePresenceFrame = useCallback(() => {
+    if (!videoRef.current) return null;
+    const video = videoRef.current;
+    const sourceW = video.videoWidth || 1280;
+    const sourceH = video.videoHeight || 720;
+    const maxW = 960;
+    const scale = Math.min(1, maxW / sourceW);
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(sourceW * scale);
+    canvas.height = Math.round(sourceH * scale);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL("image/jpeg", 0.78);
+  }, []);
+
+  const flagHandsLeftFrame = useCallback(() => {
+    handPresentRef.current = false;
+    setHandPresent(false);
+    noHandSinceRef.current = null;
+    resetGestureCountdown();
+    isFlaggedRef.current = true;
+    setIsFlagged(true);
+    console.log("[AI]: HANDS LEFT FRAME - FLAGGED.");
+    fetch(`/api/session/${id}/flag`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason: "RECORDING_GAP" }),
+    }).catch(() => {});
+  }, [id, resetGestureCountdown]);
+
+  const verifyLockedHandPresence = useCallback(async () => {
+    if (isCheckingHandPresenceRef.current) return;
+    const image = capturePresenceFrame();
+    if (!image) return;
+
+    isCheckingHandPresenceRef.current = true;
+    try {
+      const res = await fetch("/api/verify/hand-presence", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image }),
+      });
+      const data = await res.json() as { handsVisible?: boolean; confidence?: number; description?: string };
+      console.log("[AI]: Hand presence check:", data);
+
+      if (isFlaggedRef.current === false && data.handsVisible === false && Number(data.confidence ?? 0) >= 0.55) {
+        flagHandsLeftFrame();
+      } else if (isFlaggedRef.current === false) {
+        noHandSinceRef.current = null;
+        resetGestureCountdown();
+        console.log("[AI]: Hands still visually present while locked - keeping identity locked.");
+      }
+    } catch {
+      if (isFlaggedRef.current === false) {
+        noHandSinceRef.current = null;
+        resetGestureCountdown();
+        console.log("[AI]: Hand presence check failed - keeping identity locked.");
+      }
+    } finally {
+      isCheckingHandPresenceRef.current = false;
+    }
+  }, [capturePresenceFrame, flagHandsLeftFrame, resetGestureCountdown]);
+
   useEffect(() => {
     const stopEverything = () => {
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") mediaRecorderRef.current.stop();
@@ -134,15 +246,14 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
       if (videoRef.current) videoRef.current.srcObject = null;
       if (handsRef.current) { try { (handsRef.current as { close: () => void }).close(); } catch { /* ignore */ } }
       if (reEntryTimerRef.current) { clearTimeout(reEntryTimerRef.current); reEntryTimerRef.current = null; }
-      if (gestureFallbackRef.current) { clearTimeout(gestureFallbackRef.current); gestureFallbackRef.current = null; }
-      if (gestureCountdownTimerRef.current) { clearInterval(gestureCountdownTimerRef.current); gestureCountdownTimerRef.current = null; }
+      resetGestureCountdown();
       if (actionIntervalRef.current) { clearInterval(actionIntervalRef.current); actionIntervalRef.current = null; }
       if (reverifyIntervalRef.current) { clearInterval(reverifyIntervalRef.current); reverifyIntervalRef.current = null; }
       if (scanAbortControllerRef.current) { scanAbortControllerRef.current.abort(); scanAbortControllerRef.current = null; }
     };
     window.addEventListener("beforeunload", stopEverything);
     return () => { window.removeEventListener("beforeunload", stopEverything); stopEverything(); };
-  }, []);
+  }, [resetGestureCountdown]);
 
   const performDeepAudit = useCallback(async () => {
     if (!masterImage) {
@@ -198,43 +309,59 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
         img.src = dataUrl;
       });
 
-    const applyGreenFilter = (source: HTMLImageElement | HTMLVideoElement, w: number, h: number): string => {
-      const cv = document.createElement("canvas");
-      cv.width = w; cv.height = h;
-      const cx = cv.getContext("2d");
-      if (!cx) throw new Error("No context");
-      cx.drawImage(source, 0, 0, w, h);
-      const id = cx.getImageData(0, 0, w, h);
-      const d = id.data;
-      for (let i = 0; i < d.length; i += 4) { d[i] = d[i + 1]; d[i + 2] = d[i + 1]; }
-      cx.putImageData(id, 0, 0);
-      return cv.toDataURL("image/jpeg", 0.97);
-    };
-
     const captureStill = async (): Promise<string> => {
       ensureScanActive();
-      if (streamRef.current) {
-        const track = streamRef.current.getVideoTracks()[0];
-        if (track && "ImageCapture" in window) {
-          try {
-            type IC = { takePhoto(): Promise<Blob> };
-            const IC = (window as unknown as { ImageCapture: new (t: MediaStreamTrack) => IC }).ImageCapture;
-            const blob = await new IC(track).takePhoto();
-            return await new Promise<string>((res, rej) => {
-              const url = URL.createObjectURL(blob);
-              const img = new Image();
-              img.onload = () => {
-                URL.revokeObjectURL(url);
-                try { res(applyGreenFilter(img, img.naturalWidth, img.naturalHeight)); } catch (e) { rej(e); }
-              };
-              img.onerror = () => { URL.revokeObjectURL(url); rej(new Error("img load failed")); };
-              img.src = url;
-            });
-          } catch { /* fall through to canvas */ }
-        }
-      }
       if (!videoRef.current) throw new Error("No video");
-      return applyGreenFilter(videoRef.current, videoRef.current.videoWidth || 1280, videoRef.current.videoHeight || 720);
+      const cv = document.createElement("canvas");
+      const sourceW = videoRef.current.videoWidth || 1280;
+      const sourceH = videoRef.current.videoHeight || 720;
+      const maxW = 1280;
+      const scale = Math.min(1, maxW / sourceW);
+      cv.width = Math.round(sourceW * scale);
+      cv.height = Math.round(sourceH * scale);
+      const cx = cv.getContext("2d");
+      if (!cx) throw new Error("No context");
+      cx.drawImage(videoRef.current, 0, 0, cv.width, cv.height);
+      return cv.toDataURL("image/jpeg", 0.84);
+    };
+
+    const cropHands = async (dataUrl: string): Promise<string[]> => {
+      const landmarkSets = latestLandmarksRef.current.slice(0, 2);
+      if (landmarkSets.length === 0) return [];
+
+      return new Promise((resolve) => {
+        const img = document.createElement("img") as HTMLImageElement;
+        img.onload = () => {
+          const crops = landmarkSets.map((landmarks) => {
+            const xs = landmarks.map(p => p.x);
+            const ys = landmarks.map(p => p.y);
+            const minX = Math.max(0, Math.min(...xs) - 0.14);
+            const minY = Math.max(0, Math.min(...ys) - 0.18);
+            const maxX = Math.min(1, Math.max(...xs) + 0.14);
+            const maxY = Math.min(1, Math.max(...ys) + 0.18);
+            const sourceX = minX * img.naturalWidth;
+            const sourceY = minY * img.naturalHeight;
+            const sourceW = Math.max(1, (maxX - minX) * img.naturalWidth);
+            const sourceH = Math.max(1, (maxY - minY) * img.naturalHeight);
+            const crop = document.createElement("canvas");
+            const size = 640;
+            crop.width = size;
+            crop.height = size;
+            const ctx = crop.getContext("2d");
+            if (!ctx) return null;
+            ctx.fillStyle = "#fff";
+            ctx.fillRect(0, 0, size, size);
+            const scale = Math.min(size / sourceW, size / sourceH);
+            const drawW = sourceW * scale;
+            const drawH = sourceH * scale;
+            ctx.drawImage(img, sourceX, sourceY, sourceW, sourceH, (size - drawW) / 2, (size - drawH) / 2, drawW, drawH);
+            return crop.toDataURL("image/jpeg", 0.9);
+          }).filter((crop): crop is string => Boolean(crop));
+          resolve(crops);
+        };
+        img.onerror = () => resolve([]);
+        img.src = dataUrl;
+      });
     };
 
     const captureBest = async (): Promise<string> => {
@@ -252,17 +379,24 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
       return best;
     };
 
-
     try {
       const currentData = await captureBest();
       ensureScanActive();
       setCurrentSnapshot(currentData);
+      const currentHandCrops = await cropHands(currentData);
 
       const res = await fetch("/api/verify/deep-auth", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal: controller.signal,
-        body: JSON.stringify({ currentImage: currentData, masterImage, masterProfile }),
+        body: JSON.stringify({
+          currentImage: currentData,
+          currentColorImage: currentData,
+          ...(currentHandCrops.length > 0 ? { currentHandCrops } : {}),
+          masterImage,
+          ...(masterColorImage ? { masterColorImage } : {}),
+          masterProfile,
+        }),
       });
       ensureScanActive();
       const data = await res.json() as Record<string, unknown>;
@@ -272,13 +406,30 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
       if (data.observed) {
         const o = data.observed as Record<string, unknown>;
         const f: string[] = (data.flags as string[]) ?? [];
-        setScanBreakdown([
-          { q: "HAND",    label: "Hand visible?",              answer: (o.hand as string) ?? "?",    flags: o.hand === "NO" },
-          { q: "NAIL",    label: `Nails (reg: ${anchorLabels.nail ?? "?"})`, answer: (o.nail as string) ?? "?", flags: f.some(s => s.startsWith("nail")) },
-          ...(o.regmark != null ? [{ q: "REGMARK", label: "Registered mark?", answer: o.regmark as string, flags: o.regmark === "NO" }] : []),
-          { q: "MARKS",   label: "Marks",                      answer: (o.marks as string) ?? "none", flags: f.some(s => s.startsWith("marker_not_confirmed") || s.startsWith("unexpected_marks")) },
-          { q: "COMPARE", label: "Same person?",               answer: (o.compare as string) ?? "?",  flags: (o.compare as string | null | undefined) !== "YES" },
-        ]);
+        const isMatch = data.result === "MATCH";
+        const mResults: any[] = (o.markerResults as any[]) ?? [];
+        const markerDecisions: any[] = (o.markerDecisions as any[]) ?? [];
+        const rawMarkerRows = markerDecisions.length > 0 ? markerDecisions : mResults.map(m => ({
+          status: m.confirmed ? "confirmed" : m.area_visible ? "missing" : "uncertain",
+          type: m.type,
+          location: m.location,
+        }));
+        const markerRows = isMatch
+          ? rawMarkerRows.filter(m => m.status === "confirmed")
+          : rawMarkerRows;
+        
+        const rows = [
+          { q: "HAND",    label: "Both hands visible?",                      answer: (o.hand as string) ?? "?",    flags: o.hand !== "BOTH" },
+          { q: "NAIL",    label: `Nails (reg: ${anchorLabels.nail ?? "?"})`, answer: (o.nail as string) ?? "?",    flags: f.some(s => s.startsWith("nail")) },
+          { q: "STRUCT",  label: "Hand structure",                           answer: (o.structure as string) ?? "?", flags: f.some(s => s.startsWith("hand_structure")) },
+          ...(markerRows.length > 0 ? [{ 
+            q: "MARKERS", 
+            label: `${markerRows.length} marker${markerRows.length === 1 ? "" : "s"}`, 
+            answer: markerRows.map(m => `${m.status === "confirmed" ? "ok" : m.status}: ${m.type ?? "mark"} ${m.location ?? ""}`.trim()).join(" | "), 
+            flags: f.some(s => s.startsWith("marker")) 
+          }] : []),
+        ];
+        setScanBreakdown(isMatch ? rows.filter(row => !row.flags) : rows);
       }
 
       if (data.result === "MISMATCH") {
@@ -310,7 +461,7 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
         setIsDeepScanning(false);
       }
     }
-  }, [masterImage, masterProfile, addLog, anchorLabels.nail, showBiometricToast, id]);
+  }, [masterImage, masterColorImage, masterProfile, addLog, anchorLabels.nail, showBiometricToast, id]);
 
   const auditRef = useRef(performDeepAudit);
   useEffect(() => { auditRef.current = performDeepAudit; }, [performDeepAudit]);
@@ -392,10 +543,9 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
 
   const initHands = useCallback(() => {
     if (typeof window === "undefined" || !(window as unknown as Record<string, unknown>).Hands || handsRef.current) return;
-    type LM = { x: number; y: number; z: number };
     const HandsClass = (window as unknown as Record<string, unknown>).Hands as new (opts: unknown) => {
       setOptions(o: unknown): void;
-      onResults(cb: (results: { multiHandLandmarks?: LM[][] }) => void): void;
+      onResults(cb: (results: { multiHandLandmarks?: HandLandmark[][] }) => void): void;
       send(data: unknown): Promise<void>;
     };
     const hands = new HandsClass({
@@ -404,29 +554,32 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
     hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
 
     hands.onResults((results) => {
-      const handCount = Array.isArray(results.multiHandLandmarks) ? results.multiHandLandmarks.length : 0;
+      const landmarkSets = Array.isArray(results.multiHandLandmarks) ? results.multiHandLandmarks : [];
+      const handCount = landmarkSets.length;
       const hasBothHands = handCount === 2;
+      const hasBothBackhands = hasTwoBackhands(landmarkSets);
 
       if (handCount > 0) {
         noHandSinceRef.current = null;
-        if (results.multiHandLandmarks?.[0]) latestLandmarksRef.current = results.multiHandLandmarks[0];
+        latestLandmarksRef.current = landmarkSets;
 
         if (!handPresentRef.current) {
           handPresentRef.current = true;
           setHandPresent(true);
         }
 
-        // Only trigger the re-verification gesture if BOTH hands are present
-        if (hasBothHands && isFlaggedRef.current === true && !waitingForGestureRef.current && !isDeepScanningRef.current && gestureHoldRef.current === null) {
+        const needsIdentityScan = isFlaggedRef.current !== false;
+        const scanCooldownElapsed = Date.now() - lastBioScanAtRef.current > VERIFY_COOLDOWN_MS;
+        if (needsIdentityScan && hasBothBackhands && scanCooldownElapsed && !waitingForGestureRef.current && !isDeepScanningRef.current && gestureHoldRef.current === null) {
           waitingForGestureRef.current = true;
           setWaitingForGesture(true);
         }
 
         if (waitingForGestureRef.current && gestureHoldRef.current === null) {
-          if (hasBothHands) {
+          if (hasBothBackhands) {
             gestureHoldRef.current = Date.now();
-            gestureCountdownValueRef.current = 4;
-            setGestureCountdown(4);
+            gestureCountdownValueRef.current = VERIFY_HOLD_SECONDS;
+            setGestureCountdown(VERIFY_HOLD_SECONDS);
 
             gestureCountdownTimerRef.current = setInterval(() => {
               gestureCountdownValueRef.current -= 1;
@@ -440,15 +593,13 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
               waitingForGestureRef.current = false;
               setWaitingForGesture(false);
               setGestureCountdown(null);
+              lastBioScanAtRef.current = Date.now();
               auditRef.current();
-            }, 4100);
+            }, VERIFY_HOLD_MS);
           }
-        } else if (waitingForGestureRef.current && gestureHoldRef.current !== null && !hasBothHands) {
+        } else if (waitingForGestureRef.current && gestureHoldRef.current !== null && !hasBothBackhands) {
           // If we were counting down but lost one hand, reset
-          if (gestureFallbackRef.current) { clearTimeout(gestureFallbackRef.current); gestureFallbackRef.current = null; }
-          if (gestureCountdownTimerRef.current) { clearInterval(gestureCountdownTimerRef.current); gestureCountdownTimerRef.current = null; }
-          gestureHoldRef.current = null;
-          setGestureCountdown(null);
+          resetGestureCountdown();
           console.log("[AI]: Hand lost during countdown — resetting.");
         }
       } else {
@@ -456,26 +607,18 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
         if (Date.now() - noHandSinceRef.current < HAND_LOST_MS) return;
         if (!handPresentRef.current) return;
 
-        handPresentRef.current = false;
-        setHandPresent(false);
-        noHandSinceRef.current = null;
-        if (gestureHoldRef.current !== null) {
-          gestureHoldRef.current = null;
-          if (gestureFallbackRef.current) { clearTimeout(gestureFallbackRef.current); gestureFallbackRef.current = null; }
-          if (gestureCountdownTimerRef.current) { clearInterval(gestureCountdownTimerRef.current); gestureCountdownTimerRef.current = null; }
-          setGestureCountdown(null);
+        if (isFlaggedRef.current === false) {
+          void verifyLockedHandPresence();
+          return;
         }
-        waitingForGestureRef.current = false;
-        setWaitingForGesture(false);
-        isFlaggedRef.current = true; setIsFlagged(true);
-        console.log("[AI]: HANDS LEFT FRAME — FLAGGED.");
-        fetch(`/api/session/${id}/flag`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reason: "RECORDING_GAP" }) }).catch(() => {});
+
+        flagHandsLeftFrame();
       }
     });
 
     handsRef.current = hands;
     setIsMediaPipeLoaded(true);
-  }, [id]);
+  }, [flagHandsLeftFrame, verifyLockedHandPresence]);
 
   useEffect(() => {
     const checkInterval = setInterval(() => {
@@ -503,18 +646,17 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
 
         const recorder = new MediaRecorder(stream, { mimeType: "video/webm;codecs=vp8" });
         mediaRecorderRef.current = recorder;
-        recorder.ondataavailable = () => { 
-          // if (e.data.size > 0) void uploadChunk(e.data); 
-        };
+        recorder.ondataavailable = (e) => { if (e.data.size > 0) void uploadChunk(e.data); };
         recorder.start(10000);
         await fetch(`/api/session/${id}/recording-start`, { method: "POST" });
-        actionIntervalRef.current = setInterval(() => { captureActionRef.current(); }, 10000);
-        // Silent re-verify every 45s — catches mid-session person swaps after initial lock
-        reverifyIntervalRef.current = setInterval(() => {
-          if (handPresentRef.current && isFlaggedRef.current === false && !isDeepScanningRef.current) {
-            auditRef.current();
+        const triggerActionCapture = async () => {
+          if (mediaRecorderRef.current?.state === "recording") {
+            await captureActionRef.current();
+            // Wait 2 seconds before next capture after one finishes
+            actionIntervalRef.current = setTimeout(triggerActionCapture, 2000);
           }
-        }, 45000);
+        };
+        triggerActionCapture();
       } catch {
         toast.error("Camera failed.");
       }
@@ -547,9 +689,9 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
   const statusSub = isFlagged === false
     ? "Identity confirmed"
     : waitingForGesture
-      ? `Scanning in ${gestureCountdown ?? 4}…`
+      ? `Scanning in ${gestureCountdown ?? VERIFY_HOLD_SECONDS}…`
       : handPresent
-        ? "Hold hands steady — scan pending"
+        ? "Show BOTH backhands to verify"
         : isFlagged
           ? "Hands left frame — show BOTH to verify"
           : "Show BOTH hands to begin verification";

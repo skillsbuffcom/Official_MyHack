@@ -1,9 +1,44 @@
+"use client";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Shield, Zap, Award, Upload, ChevronRight, Lock, FileCheck, Fingerprint } from "lucide-react";
+import { Shield, Zap, Award, Upload, ChevronRight, Lock, FileCheck, Fingerprint, Loader2 } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { BrandMark } from "@/components/brand-mark";
 
 export default function LandingPage() {
+  const router = useRouter();
+  const [loading, setLoading] = useState(false);
+
+  const handleDirectDemo = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/session/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          workerName: "Demo Candidate",
+          icNumber: "DEMO-12345",
+          taskClaim: "Basic Terminal Block Wiring Demonstration",
+          trade: "ELECTRICAL_WIRING",
+          jobPostingId: "demo-bypass",
+          roleTargeted: "Electrical Engineer basic",
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        router.push(`/session/${data.sessionId}/verify?step=hands`);
+      } else {
+        setLoading(false);
+        alert("Demo start failed.");
+      }
+    } catch {
+      setLoading(false);
+      alert("Network error.");
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background text-foreground antialiased selection:bg-teal-500/20">
 
@@ -54,26 +89,31 @@ export default function LandingPage() {
         </p>
 
         {/* CTAs */}
-        <div className="relative flex flex-col gap-2 items-center">
+        <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
           <Link
             href="/intake"
             className="group relative inline-flex items-center gap-2 px-10 py-4 rounded-2xl text-[16px] font-semibold
               text-background dark:text-background transition-all duration-300
               bg-foreground
               hover:bg-foreground/90
-              active:scale-[0.98] shadow-xl shadow-foreground/10"
+              active:scale-[0.98] shadow-xl shadow-foreground/10 w-full sm:w-auto"
           >
             <Upload className="size-4 relative z-10" />
             <span className="relative z-10">Prove what you can do</span>
           </Link>
-          <a
-            href="#how"
-            className="inline-flex items-center gap-1.5 text-[15px] font-medium
-              text-muted-foreground hover:text-foreground
-              transition-colors duration-200"
+          
+          <button
+            onClick={handleDirectDemo}
+            disabled={loading}
+            className="group relative inline-flex items-center gap-2 px-10 py-4 rounded-2xl text-[16px] font-semibold text-purple-50 transition-all duration-300
+              bg-purple-600/20 backdrop-blur-xl border border-purple-400/30
+              shadow-[0_8px_32px_rgba(168,85,247,0.15),inset_0_1px_0_rgba(255,255,255,0.2),inset_0_-1px_0_rgba(0,0,0,0.1)]
+              hover:bg-purple-600/30 hover:border-purple-400/50 hover:shadow-[0_12px_40px_rgba(168,85,247,0.25),inset_0_1px_0_rgba(255,255,255,0.3),inset_0_-1px_0_rgba(0,0,0,0.15)]
+              active:scale-[0.98] disabled:opacity-50 w-full sm:w-auto"
           >
-            How it works <ChevronRight className="size-4" />
-          </a>
+            {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Zap className="w-5 h-5 text-purple-400" />}
+            <span>Direct Demo (Skip Intake)</span>
+          </button>
         </div>
 
         {/* Scroll hint */}
