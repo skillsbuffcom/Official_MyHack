@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback, Fragment } from "react";
-import { useParams, useSearchParams } from "next/navigation";
+import { useRouter, useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Script from "next/script";
 import { 
@@ -15,7 +15,8 @@ import {
   Activity, 
   ShieldCheck, 
   Volume2, 
-  VolumeX 
+  VolumeX, 
+  Zap 
 } from "lucide-react";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
@@ -51,19 +52,6 @@ const stepCopy: Record<string, { title: string; body: string }> = {
   },
 };
 
-interface HandLandmark { x: number; y: number; z: number; visibility?: number; }
-interface Hands {
-  setOptions(o: {
-    maxNumHands?: number;
-    modelComplexity?: number;
-    minDetectionConfidence?: number;
-    minTrackingConfidence?: number;
-    selfieMode?: boolean;
-  }): void;
-  onResults(cb: (results: { multiHandLandmarks?: HandLandmark[][] }) => void): void;
-  send(data: { image: HTMLVideoElement }): Promise<void>;
-}
-
 export default function IdentityVerificationPage() {
   const { id } = useParams();
   const searchParams = useSearchParams();
@@ -76,36 +64,15 @@ export default function IdentityVerificationPage() {
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const handsRef = useRef<Hands | null>(null);
+  const handsRef = useRef<any>(null);
   const stepRef = useRef(step);
   useEffect(() => { stepRef.current = step; }, [step]);
 
-  // Check for step in URL (Demo Bypass support)
-  useEffect(() => {
-    const s = searchParams.get("step");
-    if (s === "hands") setStep("hands");
-    else if (s === "ic") setStep("ic");
-    else if (s === "workspace") setStep("workspace");
-  }, [searchParams, setStep]);
-
+  const [capturedSnapshot, setCapturedSnapshot] = useState<string | null>(null);
   const [isCapturing, setIsCapturing] = useState(false);
   const [handsReady, setHandsReady] = useState(false);
-  const [prepCountdown, setPrepCountdown] = useState(5);
-  const [manualCapturing, setManualCapturing] = useState(false);
-  const [manualCountdown, setManualCountdown] = useState(5);
-  const [capturedSnapshot, setCapturedSnapshot] = useState<string | null>(null);
-
-  const hScanCoreRef = useRef<SVGPathElement | null>(null);
-  const hScanGlowRef = useRef<SVGPathElement | null>(null);
-  const vScanCoreRef = useRef<SVGPathElement | null>(null);
-  const vScanGlowRef = useRef<SVGPathElement | null>(null);
-  const docLine1Ref = useRef<SVGLineElement | null>(null);
-  const docLine1GlowRef = useRef<SVGLineElement | null>(null);
-  const docLine2Ref = useRef<SVGLineElement | null>(null);
-  const docLine2GlowRef = useRef<SVGLineElement | null>(null);
-  const docLine3Ref = useRef<SVGLineElement | null>(null);
-  const docLine3GlowRef = useRef<SVGLineElement | null>(null);
   const handsReadyRef = useRef(false);
+  const [prepCountdown, setPrepCountdown] = useState(5);
   const [isMediaPipeLoaded, setIsMediaPipeLoaded] = useState(false);
 
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -161,25 +128,6 @@ export default function IdentityVerificationPage() {
       gain.gain.linearRampToValueAtTime(volume, ctx.currentTime + 0.02);
       gain.gain.setValueAtTime(volume, ctx.currentTime + durationMs / 1000 - 0.05);
       gain.gain.linearRampToValueAtTime(0, ctx.currentTime + durationMs / 1000);
-      osc.start(ctx.currentTime);
-      osc.stop(ctx.currentTime + durationMs / 1000);
-    } catch {}
-  }, [isMuted, getAudioCtx]);
-
-  const playTriangle = useCallback((hz = 3200, durationMs = 1200) => {
-    if (isMuted) return;
-    try {
-      const ctx = getAudioCtx();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.type = "triangle";
-      osc.frequency.setValueAtTime(hz, ctx.currentTime);
-      // Instant attack, long exponential decay — like striking a metal triangle
-      gain.gain.setValueAtTime(0, ctx.currentTime);
-      gain.gain.linearRampToValueAtTime(0.18, ctx.currentTime + 0.004);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + durationMs / 1000);
       osc.start(ctx.currentTime);
       osc.stop(ctx.currentTime + durationMs / 1000);
     } catch {}
@@ -280,7 +228,7 @@ export default function IdentityVerificationPage() {
     isCapturingRef.current = true;
     setIsCapturing(true);
     setFaceState("scanning");
-    playTriangle();
+    playTone(520, 880, 400);
     setTimeout(() => {
       setFaceState("captured");
       playShutter();
@@ -292,7 +240,7 @@ export default function IdentityVerificationPage() {
         addLog("Face reference captured.");
       }, 900);
     }, 4000);
-  }, [addLog, setFaceState, playShutter, playTriangle, setStep]);
+  }, [addLog, setFaceState, playShutter, playTone]);
 
   useEffect(() => {
     if (faceState !== "scanning") return;
@@ -300,82 +248,6 @@ export default function IdentityVerificationPage() {
     const t1 = setTimeout(() => setScanCountdown(2), 1200);
     const t2 = setTimeout(() => setScanCountdown(1), 2400);
     return () => { clearTimeout(t0); clearTimeout(t1); clearTimeout(t2); };
-  }, [faceState]);
-
-  // Document scanner — 3 lines ping-ponging up/down at staggered phases
-  useEffect(() => {
-    if (step !== "ic") return;
-    const yTop = 2.0, yBot = 7.0;
-    const dur = 8000; // slow full cycle
-    let raf: number;
-    const start = performance.now();
-
-    // Triangular wave: 0→1→0 per cycle
-    const pingPong = (t: number) => t < 0.5 ? t * 2 : 2 - t * 2;
-
-    const setLine = (ref: React.RefObject<SVGLineElement | null>, y: number) => {
-      ref.current?.setAttribute("y1", String(y));
-      ref.current?.setAttribute("y2", String(y));
-    };
-
-    const tick = (now: number) => {
-      const t = ((now - start) % dur) / dur;
-      // Three lines staggered by 1/3 of the cycle each
-      const y1 = yTop + pingPong(t) * (yBot - yTop);
-      const y2 = yTop + pingPong((t + 1 / 3) % 1) * (yBot - yTop);
-      const y3 = yTop + pingPong((t + 2 / 3) % 1) * (yBot - yTop);
-
-      setLine(docLine1Ref, y1);   setLine(docLine1GlowRef, y1);
-      setLine(docLine2Ref, y2);   setLine(docLine2GlowRef, y2);
-      setLine(docLine3Ref, y3);   setLine(docLine3GlowRef, y3);
-
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [step]);
-
-  // 3D face contour scan — H arc (latitude) + V arc (meridian), synced to intersect at oval centre
-  useEffect(() => {
-    if (faceState !== "scanning") return;
-    const cx = 8, cy = 4.5, rx = 2.15, ry = 2.85;
-    const dur = 4000;
-    let raf: number;
-    const start = performance.now();
-
-    // Horizontal slice at y — bows upward (face protrudes toward viewer)
-    const hPath = (y: number) => {
-      const normY = (y - cy) / ry;
-      if (Math.abs(normY) >= 1) return "";
-      const hw = rx * Math.sqrt(1 - normY * normY);
-      const bow = hw * 0.42;
-      return `M ${cx - hw} ${y} Q ${cx} ${y - bow} ${cx + hw} ${y}`;
-    };
-
-    // Vertical slice at x — bows toward centre (face is convex)
-    const vPath = (x: number) => {
-      const normX = (x - cx) / rx;
-      if (Math.abs(normX) >= 1) return "";
-      const hh = ry * Math.sqrt(1 - normX * normX);
-      const bow = hh * 0.32 * -normX; // bows inward toward cx
-      return `M ${x} ${cy - hh} Q ${x + bow} ${cy} ${x} ${cy + hh}`;
-    };
-
-    const tick = (now: number) => {
-      const t = ((now - start) % dur) / dur;
-      // Both sweep simultaneously — at t=0.5, H is at y=cy and V is at x=cx → intersect at centre
-      const y = cy - ry + t * 2 * ry;
-      const x = cx - rx + t * 2 * rx;
-
-      hScanCoreRef.current?.setAttribute("d", hPath(y));
-      hScanGlowRef.current?.setAttribute("d", hPath(y));
-      vScanCoreRef.current?.setAttribute("d", vPath(x));
-      vScanGlowRef.current?.setAttribute("d", vPath(x));
-
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
   }, [faceState]);
 
   const handleCapture = () => {
@@ -421,12 +293,7 @@ export default function IdentityVerificationPage() {
       const video = videoRef.current;
       if (!video || video.readyState < 2) return;
       try {
-        const win = window as unknown as { 
-          FaceDetector: new (options: { fastMode: boolean; maxDetectedFaces: number }) => {
-            detect: (video: HTMLVideoElement) => Promise<Array<{ boundingBox: { x: number; y: number; width: number; height: number } }>>;
-          }
-        };
-        const FD = win.FaceDetector;
+        const FD = (window as any).FaceDetector;
         if (!FD) { if (st !== "searching") setFaceState("searching"); return; }
         const faces = await new FD({ fastMode: true, maxDetectedFaces: 1 }).detect(video);
         if (!active) return;
@@ -491,11 +358,10 @@ export default function IdentityVerificationPage() {
   }, [capturedSnapshot, playShutter, addLog]);
 
   const initHands = useCallback(() => {
-    const win = window as unknown as { Hands: new (config: { locateFile: (file: string) => string }) => Hands };
-    if (typeof window === "undefined" || !win.Hands || handsRef.current) return;
+    if (typeof window === "undefined" || !(window as any).Hands || handsRef.current) return;
     
     console.log("INITIALISING MEDIAPIPE HANDS...");
-    const HandsClass = win.Hands;
+    const HandsClass = (window as any).Hands;
     const hands = new HandsClass({
       locateFile: (file: string) => "https://cdn.jsdelivr.net/npm/@mediapipe/hands/" + file,
     });
@@ -507,8 +373,7 @@ export default function IdentityVerificationPage() {
       minTrackingConfidence: 0.6
     });
 
-    hands.onResults((results: { multiHandLandmarks?: HandLandmark[][] }) => {
-      // Use ref to check step to avoid capturing stale 'step'
+    hands.onResults((results: any) => {
       if (stepRef.current !== "hands" || capturedSnapshot) return;
 
       const landmarks = results.multiHandLandmarks || [];
@@ -544,7 +409,7 @@ export default function IdentityVerificationPage() {
   useEffect(() => {
     if (step === "hands" && !isMediaPipeLoaded) {
       const checkInterval = setInterval(() => {
-        if ("Hands" in window) {
+        if ((window as any).Hands) {
           initHands();
           clearInterval(checkInterval);
         }
@@ -572,23 +437,6 @@ export default function IdentityVerificationPage() {
     return () => { active = false; };
   }, [isMediaPipeLoaded, step, capturedSnapshot]);
 
-  // Manual capture: 5s countdown then auto-capture
-  useEffect(() => {
-    if (!manualCapturing || capturedSnapshot) return;
-    setManualCountdown(5);
-    let count = 5;
-    let active = true;
-    const timer = setInterval(() => {
-      if (!active) return;
-      count -= 1;
-      setManualCountdown(count);
-      if (count <= 0) {
-        clearInterval(timer);
-        if (active) doHandCapture();
-      }
-    }, 1000);
-    return () => { active = false; clearInterval(timer); };
-  }, [manualCapturing, capturedSnapshot, doHandCapture]);
   useEffect(() => {
     if (!handsReady || capturedSnapshot) return;
     let prep = 5;
@@ -646,8 +494,6 @@ export default function IdentityVerificationPage() {
     setCapturedSnapshot(null);
     setHandsReady(false);
     setPrepCountdown(5);
-    setManualCapturing(false);
-    setManualCountdown(5);
     addLog("Retry requested. Reposition both hands.");
   };
 
@@ -820,14 +666,8 @@ export default function IdentityVerificationPage() {
                     <path d="M4.2,6.45 V7.0 H4.75" />
                     <path d="M11.8,6.45 V7.0 H11.25" />
                   </g>
-                  {/* 3 scan lines — rAF driven, ping-pong up/down at staggered phases */}
                   <g clipPath="url(#doc-rect-clip)">
-                    <line ref={docLine1GlowRef} x1="4.2" y1="2.0" x2="11.8" y2="2.0" stroke="#2dd4bf" strokeWidth="0.22" opacity="0.18" />
-                    <line ref={docLine1Ref}     x1="4.2" y1="2.0" x2="11.8" y2="2.0" stroke="#2dd4bf" strokeWidth="0.045" opacity="1" />
-                    <line ref={docLine2GlowRef} x1="4.2" y1="2.0" x2="11.8" y2="2.0" stroke="#2dd4bf" strokeWidth="0.22" opacity="0.12" />
-                    <line ref={docLine2Ref}     x1="4.2" y1="2.0" x2="11.8" y2="2.0" stroke="#2dd4bf" strokeWidth="0.045" opacity="0.7" />
-                    <line ref={docLine3GlowRef} x1="4.2" y1="2.0" x2="11.8" y2="2.0" stroke="#2dd4bf" strokeWidth="0.22" opacity="0.08" />
-                    <line ref={docLine3Ref}     x1="4.2" y1="2.0" x2="11.8" y2="2.0" stroke="#2dd4bf" strokeWidth="0.045" opacity="0.45" />
+                    <line x1="4.2" y1="2.0" x2="11.8" y2="2.0" stroke="rgba(45,212,191,0.7)" strokeWidth="0.06" className="face-scan-sweep" />
                   </g>
                 </svg>
                 <div className="absolute bottom-5 inset-x-0 flex justify-center pointer-events-none">
@@ -871,18 +711,10 @@ export default function IdentityVerificationPage() {
                       {faceCountdown}
                     </text>
                   )}
-                  {/* 3D face contour scan — H latitude arc + V meridian arc, meet at centre */}
                   {faceState === "scanning" && (
                     <g clipPath="url(#face-oval-clip)">
-                      {/* Horizontal arc — glow + core */}
-                      <path ref={hScanGlowRef} d="" fill="none" stroke="#2dd4bf" strokeWidth="0.28" opacity="0.15" strokeLinecap="round" />
-                      <path ref={hScanCoreRef} d="" fill="none" stroke="#2dd4bf" strokeWidth="0.045" opacity="1" strokeLinecap="round" />
-                      {/* Vertical arc — glow + core */}
-                      <path ref={vScanGlowRef} d="" fill="none" stroke="#2dd4bf" strokeWidth="0.28" opacity="0.15" strokeLinecap="round" />
-                      <path ref={vScanCoreRef} d="" fill="none" stroke="#2dd4bf" strokeWidth="0.045" opacity="1" strokeLinecap="round" />
-                      {/* Countdown */}
-                      <text x="8" y="5.1" textAnchor="middle" fill="white"
-                        fontSize="1.6" fontWeight="700" fontFamily="system-ui" opacity="0.9">
+                      <line x1="5.5" y1="1.65" x2="10.5" y2="1.65" stroke="rgba(255,255,255,0.55)" strokeWidth="0.05" className="face-scan-sweep" />
+                      <text x="8" y="5.1" textAnchor="middle" fill="white" fontSize="1.6" fontWeight="700" fontFamily="system-ui" opacity="0.9">
                         {scanCountdown}
                       </text>
                     </g>
@@ -967,7 +799,7 @@ export default function IdentityVerificationPage() {
             {step !== "complete" && (
               <div className="absolute bottom-4 left-4">
                 <div className="rounded-full bg-black/55 px-3 py-1.5 text-[11px] font-medium text-white/80 backdrop-blur-sm">
-                  { "Step " + (currentStepIndex + 1) + " of " + steps.length + " | " + (steps[currentStepIndex]?.label || "") }
+                  Step " + (currentStepIndex + 1) + " of " + steps.length + " | " + steps[currentStepIndex]?.label
                 </div>
               </div>
             )}
@@ -1021,43 +853,6 @@ export default function IdentityVerificationPage() {
                 </div>
               )}
 
-              {step === "hands" && !handsReady && !capturedSnapshot && !manualCapturing && (
-                <div className="flex flex-col items-center gap-2">
-                  <Button
-                    variant="outline"
-                    className="w-full"
-                    onClick={() => {
-                      setManualCapturing(true);
-                      addLog("Manual capture initiated. Capturing in 5s...");
-                    }}
-                  >
-                    <Camera className="size-4 mr-2" />
-                    Capture Manually
-                  </Button>
-                  <p className="text-[11px] text-muted-foreground text-center">
-                    After clicking, you have 5 seconds to position before auto-capture.
-                  </p>
-                </div>
-              )}
-
-              {step === "hands" && !capturedSnapshot && manualCapturing && (
-                <div className="rounded-2xl bg-primary/5 p-6 border border-primary/20 flex flex-col items-center gap-4 text-center">
-                  <div className="relative">
-                    <Loader2 className="size-10 text-primary animate-spin" />
-                    <span className="absolute inset-0 flex items-center justify-center text-xs font-bold text-primary">
-                      {manualCountdown}
-                    </span>
-                  </div>
-                  <div>
-                    <p className="font-semibold">Position your hands</p>
-                    <p className="text-xs text-muted-foreground mt-1">Auto-capturing in {manualCountdown}s...</p>
-                  </div>
-                  <Button variant="ghost" size="sm" className="text-xs text-muted-foreground" onClick={handleRetry}>
-                    Cancel
-                  </Button>
-                </div>
-              )}
-
               {step === "hands" && handsReady && !capturedSnapshot && (
                 <div className="rounded-2xl bg-primary/5 p-6 border border-primary/20 flex flex-col items-center gap-4 text-center">
                   <div className="relative">
@@ -1095,13 +890,6 @@ export default function IdentityVerificationPage() {
                 </Button>
               )}
 
-              {step !== "face" && step !== "complete" && (
-                <Button variant="outline" className="w-full" onClick={handleBack}>
-                  <ArrowLeft className="size-4 mr-2" />
-                  Back to previous step
-                </Button>
-              )}
-
               {step === "complete" && (
                 <Link href={"/session/" + id + "/record"} className="w-full">
                   <Button size="lg" className="w-full h-14 text-base font-semibold shadow-xl">
@@ -1133,10 +921,10 @@ export default function IdentityVerificationPage() {
                 Live Pipeline Log
               </div>
               <div className="space-y-2 font-mono text-[11px]">
-                {logs.map((log: { time: string; msg: string }, i: number) => (
+                {logs.map((log, i) => (
                   <div key={i} className="flex gap-3 leading-relaxed animate-in fade-in slide-in-from-left-2 duration-300">
-                    <span className="shrink-0 text-foreground/70 dark:text-foreground/60">{log.time}</span>
-                    <span className={i === logs.length - 1 ? "text-primary font-medium" : "text-foreground/80 dark:text-muted-foreground"}>{log.msg}</span>
+                    <span className="shrink-0 text-muted-foreground/40">{log.time}</span>
+                    <span className={i === logs.length - 1 ? "text-primary font-medium" : "text-muted-foreground"}>{log.msg}</span>
                   </div>
                 ))}
               </div>

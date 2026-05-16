@@ -2,7 +2,6 @@
 
 import { use, useState, useEffect, useRef, useCallback } from "react";
 import { ShieldCheck, ShieldAlert, Eye, Loader2, Activity, Zap } from "lucide-react";
-import Image from "next/image";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import Script from "next/script";
@@ -116,7 +115,8 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
   const isDeepScanningRef = useRef(false);
   const isCheckingHandPresenceRef = useRef(false);
   const noHandSinceRef = useRef<number | null>(null);
-  const HAND_LOST_MS = 1500;
+  const HAND_LOST_MS = 600; 
+  const HARD_LOST_MS = 12000; // 12s — plenty of time for AI to confirm clasped hands
   const VERIFY_HOLD_SECONDS = 4;
   const VERIFY_HOLD_MS = 4100;
   const VERIFY_COOLDOWN_MS = 12000;
@@ -219,7 +219,7 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
       const data = await res.json() as { handsVisible?: boolean; confidence?: number; description?: string };
       console.log("[AI]: Hand presence check:", data);
 
-      if (isFlaggedRef.current === false && data.handsVisible === false && Number(data.confidence ?? 0) >= 0.55) {
+      if (isFlaggedRef.current === false && data.handsVisible === false && Number(data.confidence ?? 0) >= 0.80) {
         flagHandsLeftFrame();
       } else if (isFlaggedRef.current === false) {
         noHandSinceRef.current = null;
@@ -408,8 +408,8 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
         const o = data.observed as Record<string, unknown>;
         const f: string[] = (data.flags as string[]) ?? [];
         const isMatch = data.result === "MATCH";
-        const mResults = (o.markerResults as { confirmed?: boolean; area_visible?: boolean; type?: string; location?: string }[]) ?? [];
-        const markerDecisions = (o.markerDecisions as { status?: string; type?: string; location?: string }[]) ?? [];
+        const mResults: any[] = (o.markerResults as any[]) ?? [];
+        const markerDecisions: any[] = (o.markerDecisions as any[]) ?? [];
         const rawMarkerRows = markerDecisions.length > 0 ? markerDecisions : mResults.map(m => ({
           status: m.confirmed ? "confirmed" : m.area_visible ? "missing" : "uncertain",
           type: m.type,
@@ -544,15 +544,20 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
 
   const initHands = useCallback(() => {
     if (typeof window === "undefined" || !(window as unknown as Record<string, unknown>).Hands || handsRef.current) return;
-    const HandsClass = (window as unknown as Record<string, unknown>).Hands as new (opts: unknown) => Hands;
+    const HandsClass = (window as unknown as Record<string, unknown>).Hands as new (opts: unknown) => {
+      setOptions(o: unknown): void;
+      onResults(cb: (results: { multiHandLandmarks?: HandLandmark[][] }) => void): void;
+      send(data: unknown): Promise<void>;
+    };
     const hands = new HandsClass({
       locateFile: (file: string) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
     });
     hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
 
     hands.onResults((results) => {
-      const landmarkSets = Array.isArray(results.multiHandLandmarks) ? (results.multiHandLandmarks as HandLandmark[][]) : [];
+      const landmarkSets = Array.isArray(results.multiHandLandmarks) ? results.multiHandLandmarks : [];
       const handCount = landmarkSets.length;
+      const hasBothHands = handCount === 2;
       const hasBothBackhands = hasTwoBackhands(landmarkSets);
 
       if (handCount > 0) {
@@ -600,11 +605,17 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
         }
       } else {
         if (noHandSinceRef.current === null) noHandSinceRef.current = Date.now();
-        if (Date.now() - noHandSinceRef.current < HAND_LOST_MS) return;
+        const missingDuration = Date.now() - noHandSinceRef.current;
+        if (missingDuration < HAND_LOST_MS) return;
         if (!handPresentRef.current) return;
 
         if (isFlaggedRef.current === false) {
-          void verifyLockedHandPresence();
+          // If gone for > 3s, don't wait for AI anymore
+          if (missingDuration > HARD_LOST_MS) {
+            flagHandsLeftFrame();
+          } else {
+            void verifyLockedHandPresence();
+          }
           return;
         }
 
@@ -614,7 +625,7 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
 
     handsRef.current = hands;
     setIsMediaPipeLoaded(true);
-  }, [flagHandsLeftFrame, verifyLockedHandPresence, resetGestureCountdown]);
+  }, [flagHandsLeftFrame, verifyLockedHandPresence]);
 
   useEffect(() => {
     const checkInterval = setInterval(() => {
@@ -686,6 +697,8 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
     ? "Identity confirmed"
     : waitingForGesture
       ? `Scanning in ${gestureCountdown ?? VERIFY_HOLD_SECONDS}…`
+    : isCheckingHandPresenceRef.current
+      ? "AI Confirming Presence..."
       : handPresent
         ? "Show BOTH backhands to verify"
         : isFlagged
@@ -712,7 +725,7 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
       )}
 
       {/* HUD */}
-      <div className="absolute top-0 left-0 right-0 h-24 bg-linear-to-b from-black/60 to-transparent z-10 flex items-center justify-between px-6">
+      <div className="absolute top-0 left-0 right-0 h-24 bg-gradient-to-b from-black/60 to-transparent z-10 flex items-center justify-between px-6">
         <BrandMark className="scale-90 origin-left" />
         <div className="flex items-center gap-4">
           <div className="flex flex-col items-end">
@@ -729,12 +742,12 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
       {/* Biometric Status */}
       <div className="absolute left-6 top-32 z-10 flex flex-col gap-4 w-72">
         <Card className="bg-black/60 backdrop-blur-xl border-white/10 p-4 rounded-2xl flex items-center gap-4">
-          <div className={`size-12 rounded-2xl flex items-center justify-center border-2 ${isFlagged === false ? "border-[#2dd4bf] bg-[#2dd4bf]/10 text-[#2dd4bf]" : isFlagged === true ? "border-red-500 bg-red-500/10 text-red-500" : "border-white/20 bg-white/5 text-white/40"}`}>
+          <div className={`size-12 rounded-2xl flex items-center justify-center border-2 ${isFlagged === false ? "border-[#2dd4bf] bg-[#2dd4bf]/10 text-white" : isFlagged === true ? "border-red-500 bg-red-500/10 text-red-500" : "border-white/20 bg-white/5 text-white/40"}`}>
             {isFlagged === false ? <ShieldCheck /> : isFlagged === true ? <ShieldAlert /> : <Eye />}
           </div>
           <div>
             <p className="text-[10px] font-bold uppercase tracking-widest text-white/40">{statusLabel}</p>
-            <p className="text-sm font-medium leading-none mt-1">{statusSub}</p>
+            <p className="text-sm font-medium leading-none mt-1 text-white">{statusSub}</p>
           </div>
         </Card>
 
@@ -781,8 +794,8 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
                 <div className="flex flex-col gap-1">
                   <p className="text-[9px] font-bold uppercase tracking-widest text-white/40 px-1">Reference</p>
                   <div className="aspect-video relative rounded-lg overflow-hidden border border-white/5">
-                    <Image src={masterImage} alt="Reference" className="w-full h-full object-cover grayscale opacity-50" fill unoptimized />
-                    <div className="absolute inset-0 bg-linear-to-t from-black/60 to-transparent" />
+                    <img src={masterImage} alt="Reference" className="w-full h-full object-cover grayscale opacity-50" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
                     <div className="absolute bottom-1 left-1 flex items-center gap-1">
                       <ShieldCheck className="size-2.5 text-[#2dd4bf]" />
                       <span className="text-[8px] font-bold text-white/60 uppercase">Locked</span>
@@ -794,8 +807,8 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
                 <div className="flex flex-col gap-1">
                   <p className="text-[9px] font-bold uppercase tracking-widest text-white/40 px-1">Last Scan</p>
                   <div className="aspect-video relative rounded-lg overflow-hidden border border-white/5">
-                    <Image src={currentSnapshot} alt="Last scan" className="w-full h-full object-cover grayscale opacity-50" fill unoptimized />
-                    <div className="absolute inset-0 bg-linear-to-t from-black/60 to-transparent" />
+                    <img src={currentSnapshot} alt="Last scan" className="w-full h-full object-cover grayscale opacity-50" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
                     <div className="absolute bottom-1 left-1">
                       <span className="text-[8px] font-bold text-white/60 uppercase">Live</span>
                     </div>

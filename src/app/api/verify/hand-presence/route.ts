@@ -18,9 +18,10 @@ export async function POST(req: Request) {
     if (!image) return NextResponse.json({ error: "Missing image" }, { status: 400 });
 
     const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-    const prompt = `Look at this camera frame from a hands-on work session.
-Determine whether the worker's hands are still visible anywhere in frame, even if clasped together, gripping a screwdriver/tool, partially overlapped, or not detectable as separate open hands.
-Only answer no when no human hand or meaningful part of a hand is visible.
+    const prompt = `Determine whether the worker's hands (or any part of them) are visible.
+Be HYPER-LENIENT: If you see a fist, clasped hands, interlocking fingers, a palm, or even a skin-toned object that looks like a hand, you MUST answer "hands_visible": true.
+Only answer "hands_visible": false if the frame is completely empty of human hands. 
+If you are even 1% unsure, answer true.
 Respond ONLY with valid JSON:
 {
   "hands_visible": true,
