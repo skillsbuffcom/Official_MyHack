@@ -28,17 +28,7 @@ export default function LandingPage() {
       </nav>
 
       {/* ── Hero ── */}
-      <section className="relative flex flex-col items-center text-center px-6 pt-[7.5rem] pb-16 md:pt-[9.5rem] md:pb-24 overflow-hidden">
-
-        {/* Ambient background */}
-        <div className="absolute inset-0 pointer-events-none">
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[900px] h-[600px]
-            bg-teal-500/[0.07] dark:bg-teal-500/[0.05] rounded-full blur-[140px]" />
-          <div
-            className="absolute inset-0 opacity-[0.025] dark:opacity-[0.04]"
-            style={{ backgroundImage: "radial-gradient(circle, currentColor 1px, transparent 1px)", backgroundSize: "32px 32px" }}
-          />
-        </div>
+      <section className="flex flex-col items-center text-center px-6 pt-[7.5rem] pb-16 md:pt-[9.5rem] md:pb-24">
 
         {/* Badge */}
         <div className="relative inline-flex items-center gap-2 px-3.5 py-1.5 mb-8 rounded-full
