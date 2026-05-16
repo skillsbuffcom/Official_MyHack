@@ -5,7 +5,10 @@ import Link from "next/link";
 import { Shield, Zap, Award, Upload, ChevronRight, Loader2 } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { BrandMark } from "@/components/brand-mark";
-import { BiometricIllustration, AIIllustration, HashIllustration, EmployerReadIllustration } from "@/components/feature-illustrations";
+import { AIIllustration as AITest } from "@/components/AITest";
+import { HashIllustration as HashTest } from "@/components/HashTest";
+import { EmployerReadIllustration as EmployerTest } from "@/components/EmployerTest";
+import { BiometricIllustration } from "@/components/feature-illustrations";
 
 export default function LandingPage() {
   const router = useRouter();
@@ -106,13 +109,11 @@ export default function LandingPage() {
           <button
             onClick={handleDirectDemo}
             disabled={loading}
-            className="group relative inline-flex items-center gap-2 px-10 py-4 rounded-2xl text-[16px] font-semibold text-purple-50 transition-all duration-300
-              bg-purple-600/20 backdrop-blur-xl border border-purple-400/30
-              shadow-[0_8px_32px_rgba(168,85,247,0.15),inset_0_1px_0_rgba(255,255,255,0.2),inset_0_-1px_0_rgba(0,0,0,0.1)]
-              hover:bg-purple-600/30 hover:border-purple-400/50 hover:shadow-[0_12px_40px_rgba(168,85,247,0.25),inset_0_1px_0_rgba(255,255,255,0.3),inset_0_-1px_0_rgba(0,0,0,0.15)]
-              active:scale-[0.98] disabled:opacity-50 w-full sm:w-auto"
+            className="inline-flex items-center gap-2 px-10 py-4 rounded-2xl text-[16px] font-semibold
+              bg-primary text-primary-foreground transition-all duration-200
+              hover:bg-primary/90 active:scale-[0.98] disabled:opacity-50 w-full sm:w-auto justify-center"
           >
-            {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Zap className="w-5 h-5 text-purple-400" />}
+            {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Zap className="w-5 h-5" />}
             <span>Direct Demo (Skip Intake)</span>
           </button>
 
@@ -198,9 +199,9 @@ export default function LandingPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {([
               { Illustration: BiometricIllustration,    title: "3-Layer Biometric Lock",    tag: "Identity",     desc: "Face recognition, hand-presence detection, and continuous activity monitoring. The person who starts is the person who finishes." },
-              { Illustration: AIIllustration,           title: "AI-Powered Assessment",      tag: "Gemini AI",    desc: "Gemini extracts required skills from any role description and builds a deterministic practical brief tailored to the exact role — in seconds." },
-              { Illustration: HashIllustration,         title: "SHA-256 Cryptographic Seal", tag: "Cryptography", desc: "Every certificate is hashed and signed at issuance. Cannot be altered, duplicated, or fabricated. Mathematical proof of authenticity." },
-              { Illustration: EmployerReadIllustration, title: "30-Second Employer Read",    tag: "Hiring",       desc: "Composite grade, hire signal, safety score, and skills breakdown. Any employer can make a confident decision in half a minute." },
+              { Illustration: AITest,                   title: "AI-Powered Assessment",      tag: "Gemini AI",    desc: "Gemini extracts required skills from any role description and builds a deterministic practical brief tailored to the exact role — in seconds." },
+              { Illustration: HashTest,                 title: "SHA-256 Cryptographic Seal", tag: "Cryptography", desc: "Every certificate is hashed and signed at issuance. Cannot be altered, duplicated, or fabricated. Mathematical proof of authenticity." },
+              { Illustration: EmployerTest,             title: "30-Second Employer Read",    tag: "Hiring",       desc: "Composite grade, hire signal, safety score, and skills breakdown. Any employer can make a confident decision in half a minute." },
             ] as const).map(({ Illustration, title, tag, desc }) => (
               <div key={title} className="group rounded-2xl border border-border bg-card overflow-hidden hover:border-primary/30 transition-colors duration-300">
                 <div className="h-48 relative bg-muted/20">
@@ -209,7 +210,7 @@ export default function LandingPage() {
                 <div className="px-6 pb-6 pt-4 space-y-2">
                   <div className="flex items-start justify-between gap-3">
                     <h3 className="font-black text-[15px] tracking-tight text-foreground leading-tight">{title}</h3>
-                    <span className="shrink-0 text-[9px] font-bold uppercase tracking-[0.15em] px-2.5 py-1 rounded-full border border-border text-muted-foreground group-hover:border-primary/40 group-hover:text-primary transition-colors duration-200">
+                    <span className="shrink-0 text-[9px] font-bold uppercase tracking-[0.15em] px-2.5 py-1 rounded-full border border-primary/30 text-primary transition-colors duration-200">
                       {tag}
                     </span>
                   </div>

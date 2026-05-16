@@ -3,15 +3,15 @@
 import { useEffect, useRef } from "react";
 
 /* ─── shared grid background ─────────────────────────────── */
-function GridBg() {
+export function GridBg() {
   return (
     <svg className="absolute inset-0 w-full h-full" xmlns="http://www.w3.org/2000/svg">
       <defs>
-        <pattern id="feat-grid" width="20" height="20" patternUnits="userSpaceOnUse">
-          <path d="M 20 0 L 0 0 0 20" fill="none" stroke="currentColor" strokeWidth="0.5" strokeOpacity="0.08" />
+        <pattern id="feat-dots" width="16" height="16" patternUnits="userSpaceOnUse">
+          <circle cx="1" cy="1" r="0.8" fill="currentColor" fillOpacity="0.25" />
         </pattern>
       </defs>
-      <rect width="100%" height="100%" fill="url(#feat-grid)" />
+      <rect width="100%" height="100%" fill="url(#feat-dots)" />
     </svg>
   );
 }
@@ -52,87 +52,72 @@ export function BiometricIllustration() {
             <stop offset="100%" stopColor="#0f766e" stopOpacity="0" />
           </linearGradient>
           <clipPath id="palm-clip">
-            <path d="M85,130 C75,130 65,120 65,105 C65,95 55,90 55,80 C55,70 65,65 75,75 L80,85 V50 C80,42 90,42 90,50 V85 H95 V45 C95,37 105,37 105,45 V85 H110 V50 C110,42 120,42 120,50 V90 H125 V65 C125,57 135,57 135,65 V110 C135,122 125,130 110,130 H85 Z" />
+            <path d="M65,130 C55,130 45,120 45,105 C45,95 35,90 35,80 C35,70 45,65 55,75 L60,85 V50 C60,42 70,42 70,50 V85 H75 V45 C75,37 85,37 85,45 V85 H90 V50 C90,42 100,42 100,50 V90 H105 V65 C105,57 115,57 115,65 V110 C115,122 105,130 90,130 H65 Z" />
           </clipPath>
         </defs>
 
-        {/* Scanner frame */}
-        <circle cx="96" cy="82" r="52" fill="none" stroke="currentColor" strokeWidth="1" strokeOpacity="0.14" />
-        <circle
-          cx="96"
-          cy="82"
-          r="44"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="0.7"
-          strokeDasharray="3 4"
-          strokeOpacity="0.28"
-          style={{ animation: "spin 14s linear infinite", transformOrigin: "96px 82px" }}
-        />
-
-        {/* Corner brackets */}
-        {[[-1,-1],[1,-1],[1,1],[-1,1]].map(([sx,sy], i) => {
-          const cx = 96 + sx * 50, cy = 82 + sy * 50;
-          return (
-            <g key={i} stroke="currentColor" strokeWidth="1.5" strokeOpacity="0.5" fill="none">
-              <path d={`M ${cx} ${cy + sy*-8} L ${cx} ${cy} L ${cx + sx*-8} ${cy}`} />
-            </g>
-          );
-        })}
-
-        {/* Palm silhouette */}
-        <path
-          d="M85,130 C75,130 65,120 65,105 C65,95 55,90 55,80 C55,70 65,65 75,75 L80,85 V50 C80,42 90,42 90,50 V85 H95 V45 C95,37 105,37 105,45 V85 H110 V50 C110,42 120,42 120,50 V90 H125 V65 C125,57 135,57 135,65 V110 C135,122 125,130 110,130 H85 Z"
-          fill="currentColor"
-          fillOpacity="0.035"
-          stroke="currentColor"
-          strokeWidth="1"
-          strokeOpacity="0.22"
-        />
-
-        {/* Palm scan lines */}
-        <g stroke="#0f766e" fill="none" strokeLinecap="round" strokeOpacity="0.48">
-          <path d="M85 55 V115" strokeWidth="1.2" />
-          <path d="M100 50 V115" strokeWidth="1.2" />
-          <path d="M115 55 V115" strokeWidth="1.2" />
-          <path d="M78 100 C86 94 95 91 104 91 C114 91 122 94 131 101" strokeWidth="1.1" />
-          <path d="M76 110 C86 104 96 101 107 101 C118 101 128 105 137 113" strokeWidth="1.1" />
-          <path d="M80 121 C91 117 103 115 115 116 C124 117 132 119 138 123" strokeWidth="1.1" />
-        </g>
-
-        {/* Scanner HUD */}
-        <g fill="none" stroke="#0f766e" strokeOpacity="0.45">
-          <path d="M41 62 H55" strokeWidth="1.1" />
-          <path d="M41 68 H51" strokeWidth="1.1" />
-          <path d="M136 35 H148" strokeWidth="1.1" />
-          <path d="M140 41 H148" strokeWidth="1.1" />
-          <circle cx="49" cy="101" r="9" strokeWidth="0.8" strokeOpacity="0.28" />
-          <circle cx="49" cy="101" r="3" strokeWidth="1.1" />
-        </g>
-
-        {/* Scan beam */}
-        <g clipPath="url(#palm-clip)">
-          <rect ref={glowRef} x="56" y="16" width="88" height="32" fill="url(#scan-grad)" opacity="0.18" />
-          <line ref={lineRef} x1="56" y1="32" x2="144" y2="32" stroke="#0f766e" strokeWidth="1.4" strokeOpacity="0.82" />
-        </g>
-
-        {/* Signal dots */}
-        {[0, 1, 2].map((i) => (
+        <g transform="translate(-20, 0)">
+          {/* Scanner frame */}
+          <circle cx="96" cy="82" r="52" fill="none" stroke="currentColor" strokeWidth="1" strokeOpacity="0.14" />
           <circle
-            key={i}
-            cx={48 + i * 8}
-            cy="36"
-            r="2"
-            fill="#0f766e"
-            fillOpacity={0.25 + i * 0.18}
-            style={{ animation: `feat-pulse 1.8s ${i * 0.2}s ease-in-out infinite` }}
+            cx="96"
+            cy="82"
+            r="44"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="0.7"
+            strokeDasharray="3 4"
+            strokeOpacity="0.28"
+            style={{ animation: "spin 14s linear infinite", transformOrigin: "96px 82px" }}
           />
-        ))}
 
-        {/* Confirmed badge */}
-        <g style={{ animation: "feat-fade-up 1.2s 0.8s ease-out both" }}>
-          <rect x="68" y="136" width="56" height="16" rx="8" fill="#0f766e" fillOpacity="0.1" stroke="#0f766e" strokeWidth="0.75" strokeOpacity="0.4" />
-          <text x="96" y="144" textAnchor="middle" dominantBaseline="middle" fontSize="7" fontWeight="700" fill="#0f766e" letterSpacing="0.05em" fontFamily="monospace">CONFIRMED</text>
+          {/* Corner brackets */}
+          {[[-1,-1],[1,-1],[1,1],[-1,1]].map(([sx,sy], i) => {
+            const cx = 96 + sx * 50, cy = 82 + sy * 50;
+            return (
+              <g key={i} stroke="currentColor" strokeWidth="1.5" strokeOpacity="0.5" fill="none">
+                <path d={`M ${cx} ${cy + sy*-8} L ${cx} ${cy} L ${cx + sx*-8} ${cy}`} />
+              </g>
+            );
+          })}
+
+          {/* Palm silhouette */}
+          <path
+            d="M85,130 C75,130 65,120 65,105 C65,95 55,90 55,80 C55,70 65,65 75,75 L80,85 V50 C80,42 90,42 90,50 V85 H95 V45 C95,37 105,37 105,45 V85 H110 V50 C110,42 120,42 120,50 V90 H125 V65 C125,57 135,57 135,65 V110 C135,122 125,130 110,130 H85 Z"
+            fill="currentColor"
+            fillOpacity="0.035"
+            stroke="currentColor"
+            strokeWidth="1"
+            strokeOpacity="0.22"
+          />
+
+          {/* Palm scan lines */}
+          <g stroke="#0f766e" fill="none" strokeLinecap="round" strokeOpacity="0.48">
+            <path d="M85 55 V115" strokeWidth="1.2" />
+            <path d="M100 50 V115" strokeWidth="1.2" />
+            <path d="M115 55 V115" strokeWidth="1.2" />
+            <path d="M78 100 C86 94 95 91 104 91 C114 91 122 94 131 101" strokeWidth="1.1" />
+            <path d="M76 110 C86 104 96 101 107 101 C118 101 128 105 137 113" strokeWidth="1.1" />
+            <path d="M80 121 C91 117 103 115 115 116 C124 117 132 119 138 123" strokeWidth="1.1" />
+          </g>
+
+          {/* Scanner HUD */}
+          <g fill="none" stroke="#0f766e" strokeOpacity="0.45">
+            <path d="M136 35 H148" strokeWidth="1.1" />
+            <path d="M140 41 H148" strokeWidth="1.1" />
+          </g>
+
+          {/* Scan beam */}
+          <g clipPath="url(#palm-clip)">
+            <rect ref={glowRef} x="36" y="16" width="88" height="32" fill="url(#scan-grad)" opacity="0.18" />
+            <line ref={lineRef} x1="36" y1="32" x2="124" y2="32" stroke="#0f766e" strokeWidth="1.4" strokeOpacity="0.82" />
+          </g>
+
+          {/* Confirmed badge */}
+          <g style={{ animation: "feat-fade-up 1.2s 0.8s ease-out both" }}>
+            <rect x="68" y="136" width="56" height="16" rx="8" fill="#0f766e" fillOpacity="0.1" stroke="#0f766e" strokeWidth="0.75" strokeOpacity="0.4" />
+            <text x="96" y="144" textAnchor="middle" dominantBaseline="middle" fontSize="7" fontWeight="700" fill="#0f766e" letterSpacing="0.05em" fontFamily="monospace">CONFIRMED</text>
+          </g>
         </g>
       </svg>
     </div>
@@ -147,21 +132,20 @@ export function AIIllustration() {
     { y: 70, color: "#0891b2", dur: "1.8s", begin: "0.3s" },
     { y: 82, color: "#6366f1", dur: "1.2s", begin: "0.6s" },
   ];
-  const chipX = 125;
+  const chipX = 170;
   const chipY = 45;
-  const chipCenter = chipX + 25;
-  const leftWireStart = 84;
+  const leftWireStart = 60;
   const leftWireEnd = chipX - 5;
   const rightWireStart = chipX + 55;
-  const rightWireEnd = 226;
+  const rightWireEnd = 280;
 
   return (
     <div className="relative w-full h-full overflow-hidden text-foreground">
       <GridBg />
-      <svg viewBox="0 0 300 140" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" className="absolute inset-0">
+      <svg viewBox="0 0 350 140" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" className="absolute inset-0">
         <defs>
           {wires.map(({ color, dur, begin }, i) => (
-            <linearGradient key={i} id={`volt-l${i}`} gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="300" y2="0">
+            <linearGradient key={i} id={`volt-l${i}`} gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="350" y2="0">
               <stop offset="0%"  stopColor={color} stopOpacity="0">
                 <animate attributeName="offset" values="-0.3;1.3" dur={dur} begin={begin} repeatCount="indefinite" />
               </stop>
@@ -176,9 +160,9 @@ export function AIIllustration() {
         </defs>
 
         {/* ── Left: Role Description ── */}
-        <text x="12" y="32" fontSize="5.5" fontWeight="700" fill="currentColor" fillOpacity="0.3" letterSpacing="0.1em">ROLE DESCRIPTION</text>
+        <text x="8" y="32" fontSize="5.5" fontWeight="700" fill="currentColor" fillOpacity="0.3" letterSpacing="0.1em">ROLE DESCRIPTION</text>
         {[40, 50, 60, 70, 80, 90].map((y, i) => (
-          <rect key={i} x="12" y={y} width={[66, 42, 60, 38, 54, 46][i]} height="4" rx="2"
+          <rect key={i} x="8" y={y} width={[40, 28, 36, 24, 32, 28][i]} height="4" rx="2"
             fill="currentColor" fillOpacity="0.12"
             style={{ animation: `feat-fade-up 0.35s ${i * 0.06}s ease-out both` }} />
         ))}
@@ -200,9 +184,9 @@ export function AIIllustration() {
             fill="#0f766e" fillOpacity="0.05" stroke="#0f766e" strokeWidth="0.5" strokeOpacity="0.4" />
           {[16, 25, 34].map(x => <line key={x} x1={x} y1="7" x2={x} y2="43" stroke="#0f766e" strokeWidth="0.4" strokeOpacity="0.25" />)}
           {[16, 25, 34].map(y => <line key={y} x1="7" y1={y} x2="43" y2={y} stroke="#0f766e" strokeWidth="0.4" strokeOpacity="0.25" />)}
-          {/* left pins (outer edge x=−5, global x=120) */}
+          {/* left pins */}
           {[10, 22, 34].map((py, j) => <rect key={j} x="-5" y={py} width="5" height="3" rx="0.5" fill="#0f766e" fillOpacity="0.35" />)}
-          {/* right pins (outer edge x=55, global x=180) */}
+          {/* right pins */}
           {[10, 22, 34].map((py, j) => <rect key={j} x="50" y={py} width="5" height="3" rx="0.5" fill="#0f766e" fillOpacity="0.35" />)}
           {[10, 22, 34].map((px, j) => <rect key={j} x={px} y="-5" width="3" height="5" rx="0.5" fill="#0f766e" fillOpacity="0.35" />)}
           {[10, 22, 34].map((px, j) => <rect key={j} x={px} y="50" width="3" height="5" rx="0.5" fill="#0f766e" fillOpacity="0.35" />)}
@@ -218,19 +202,17 @@ export function AIIllustration() {
           </g>
         ))}
 
-        <line x1={chipCenter} y1="22" x2={chipCenter} y2="118" stroke="currentColor" strokeWidth="0.6" strokeOpacity="0.08" strokeDasharray="2 4" />
-
         {/* ── Right: Skill badges ── */}
-        <text x="228" y="32" fontSize="5.5" fontWeight="700" fill="currentColor" fillOpacity="0.3" letterSpacing="0.1em">SKILLS</text>
+        <text x="280" y="32" fontSize="5.5" fontWeight="700" fill="currentColor" fillOpacity="0.3" letterSpacing="0.1em">SKILLS</text>
         {[
           { y: 46, label: "WIRING",  color: "#0f766e" },
           { y: 62, label: "SAFETY",  color: "#0891b2" },
           { y: 78, label: "QUALITY", color: "#6366f1" },
         ].map(({ y, label, color }, i) => (
           <g key={i} style={{ animation: `feat-fade-up 0.4s ${0.5 + i * 0.12}s ease-out both` }}>
-            <rect x="228" y={y - 5} width="60" height="13" rx="6.5"
+            <rect x="280" y={y - 5} width="60" height="13" rx="6.5"
               fill={color} fillOpacity="0.07" stroke={color} strokeWidth="0.6" strokeOpacity="0.5" />
-            <text x="258" y={y + 4} textAnchor="middle" fontSize="5.5" fontWeight="700" fill={color} letterSpacing="0.1em">{label}</text>
+            <text x="310" y={y + 4} textAnchor="middle" fontSize="5.5" fontWeight="700" fill={color} letterSpacing="0.1em">{label}</text>
           </g>
         ))}
       </svg>
@@ -247,40 +229,113 @@ export function HashIllustration() {
     <div className="relative w-full h-full flex items-center justify-center overflow-hidden text-foreground">
       <GridBg />
       <svg viewBox="0 0 200 140" width="200" height="140" className="relative z-10">
-        {/* Certificate card outline */}
-        <rect x="30" y="20" width="140" height="100" rx="8" fill="none"
-          stroke="currentColor" strokeWidth="0.75" strokeOpacity="0.15" />
+        <defs>
+          <linearGradient id="hash-sweep" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stopColor="#0f766e" stopOpacity="0" />
+            <stop offset="50%" stopColor="#0f766e" stopOpacity="0.9" />
+            <stop offset="100%" stopColor="#0f766e" stopOpacity="0" />
+          </linearGradient>
+          <linearGradient id="cert-fill" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor="currentColor" stopOpacity="0.05" />
+            <stop offset="100%" stopColor="currentColor" stopOpacity="0.015" />
+          </linearGradient>
+          <radialGradient id="seal-aura" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stopColor="#0f766e" stopOpacity="0.12" />
+            <stop offset="100%" stopColor="#0f766e" stopOpacity="0" />
+          </radialGradient>
+        </defs>
 
-        {/* Top bar */}
-        <rect x="30" y="20" width="140" height="16" rx="8" fill="currentColor" fillOpacity="0.04" />
-        <rect x="35" y="25" width="32" height="5" rx="2.5" fill="currentColor" fillOpacity="0.15" />
-        <circle cx="158" cy="27.5" r="3" fill="currentColor" fillOpacity="0.1" stroke="currentColor" strokeWidth="0.5" strokeOpacity="0.3" />
+        {/* Certificate */}
+        <g style={{ animation: "feat-fade-up 0.45s 0.1s ease-out both" }}>
+          <rect x="18" y="24" width="86" height="92" rx="10" fill="url(#cert-fill)" stroke="currentColor" strokeWidth="0.8" strokeOpacity="0.16" />
+          <rect x="18" y="24" width="86" height="15" rx="10" fill="currentColor" fillOpacity="0.03" />
+          <rect x="27" y="30" width="24" height="3.5" rx="1.75" fill="currentColor" fillOpacity="0.14" />
+          <rect x="27" y="48" width="48" height="6" rx="3" fill="currentColor" fillOpacity="0.12" />
+          <rect x="27" y="58" width="32" height="3.5" rx="1.75" fill="currentColor" fillOpacity="0.07" />
+        </g>
 
-        {/* Name line */}
-        <rect x="40" y="48" width="80" height="7" rx="3.5" fill="currentColor" fillOpacity="0.12"
-          style={{ animation: "feat-fade-up 0.4s 0.2s ease-out both" }} />
-        <rect x="40" y="60" width="55" height="4" rx="2" fill="currentColor" fillOpacity="0.07"
-          style={{ animation: "feat-fade-up 0.4s 0.3s ease-out both" }} />
+        {/* Hash block */}
+        <g style={{ animation: "feat-fade-up 0.45s 0.2s ease-out both" }}>
+          <text x="27" y="78" fontSize="5.4" fontFamily="monospace" fill="currentColor" fillOpacity="0.24">SHA-256</text>
+          <text x="27" y="88" fontSize="5.2" fontFamily="monospace" fill="#0f766e" fillOpacity="0.78">{HASH}</text>
+          <text x="27" y="96" fontSize="5.2" fontFamily="monospace" fill="#0f766e" fillOpacity="0.52">{HASH2}</text>
+          <rect x="27" y="104" width="50" height="8" rx="4" fill="#0f766e" fillOpacity="0.08" stroke="#0f766e" strokeWidth="0.6" strokeOpacity="0.28" />
+          <text x="52" y="108" textAnchor="middle" dominantBaseline="middle" fontSize="4.8" fontWeight="700" fill="#0f766e" letterSpacing="0.12em">
+            VERIFIED
+          </text>
+        </g>
 
-        {/* Hash lines */}
-        <text x="40" y="82" fontSize="5.5" fontFamily="monospace" fill="currentColor" fillOpacity="0.25"
-          style={{ animation: "feat-fade-up 0.4s 0.5s ease-out both" }}>
-          SHA256:
-        </text>
-        <text x="40" y="90" fontSize="5" fontFamily="monospace" fill="#0f766e" fillOpacity="0.7"
-          style={{ animation: "feat-fade-up 0.4s 0.6s ease-out both" }}>
-          {HASH}
-        </text>
-        <text x="40" y="98" fontSize="5" fontFamily="monospace" fill="#0f766e" fillOpacity="0.5"
-          style={{ animation: "feat-fade-up 0.4s 0.7s ease-out both" }}>
-          {HASH2}
-        </text>
+        {/* Link */}
+        <g style={{ animation: "feat-fade-up 0.45s 0.3s ease-out both" }}>
+          <line x1="112" y1="70" x2="138" y2="70" stroke="currentColor" strokeWidth="0.7" strokeOpacity="0.14" />
+          <line x1="112" y1="70" x2="138" y2="70" stroke="url(#hash-sweep)" strokeWidth="1.6" strokeLinecap="round">
+            <animate attributeName="x1" values="112;122;112" dur="1.8s" repeatCount="indefinite" />
+            <animate attributeName="x2" values="126;138;126" dur="1.8s" repeatCount="indefinite" />
+          </line>
+          <circle cx="122" cy="70" r="1.8" fill="#0f766e" fillOpacity="0.55">
+            <animate attributeName="cx" values="112;138;112" dur="1.8s" repeatCount="indefinite" />
+            <animate attributeName="opacity" values="0;1;0" dur="1.8s" repeatCount="indefinite" />
+          </circle>
+        </g>
 
-        {/* Shield badge */}
-        <g transform="translate(148, 52)" style={{ animation: "feat-fade-up 0.5s 0.9s ease-out both" }}>
-          <path d="M11 0 L22 4 L22 12 C22 18 11 24 11 24 C11 24 0 18 0 12 L0 4 Z"
-            fill="#0f766e" fillOpacity="0.12" stroke="#0f766e" strokeWidth="0.8" strokeOpacity="0.5" />
-          <text x="11" y="15" textAnchor="middle" fontSize="9" fill="#0f766e" fillOpacity="0.8">✓</text>
+        {/* Seal */}
+        <g transform="translate(136, 34)" style={{ animation: "feat-fade-up 0.55s 0.4s ease-out both" }}>
+          <circle cx="28" cy="36" r="28" fill="url(#seal-aura)" style={{ animation: "feat-pulse 2.8s ease-in-out infinite" }} />
+          <circle cx="28" cy="36" r="22" fill="none" stroke="#0f766e" strokeWidth="0.9" strokeOpacity="0.28" />
+          <circle
+            cx="28"
+            cy="36"
+            r="16"
+            fill="none"
+            stroke="#0f766e"
+            strokeWidth="0.8"
+            strokeOpacity="0.52"
+            strokeDasharray="3 4"
+            style={{ animation: "spin 12s linear infinite", transformOrigin: "28px 36px" }}
+          />
+          <path
+            d="M28 18 L39 22 L39 34 C39 40 28 47 28 47 C28 47 17 40 17 34 L17 22 Z"
+            fill="#0f766e"
+            fillOpacity="0.1"
+            stroke="#0f766e"
+            strokeWidth="0.9"
+            strokeOpacity="0.62"
+          />
+          <text x="28" y="34.5" textAnchor="middle" dominantBaseline="middle" fontSize="9" fontWeight="700" fill="#0f766e">✓</text>
+        </g>
+
+        {/* Lock */}
+        <g transform="translate(175, 82)" style={{ animation: "feat-fade-up 0.45s 0.62s ease-out both" }}>
+          <path
+            d="M8 12 V8 C8 3.8 11.2 1 15 1 C18.8 1 22 3.8 22 8 V12"
+            fill="none"
+            stroke="#0f766e"
+            strokeWidth="1.4"
+            strokeOpacity="0.56"
+            strokeLinecap="round"
+            style={{ animation: "feat-pulse 2.2s ease-in-out infinite" }}
+          />
+          <rect
+            x="5"
+            y="12"
+            width="20"
+            height="16"
+            rx="4"
+            fill="#0f766e"
+            fillOpacity="0.08"
+            stroke="#0f766e"
+            strokeWidth="0.9"
+            strokeOpacity="0.5"
+          />
+          <circle cx="15" cy="19" r="2.2" fill="#0f766e" fillOpacity="0.78" />
+          <path d="M15 21.2 V24" stroke="#0f766e" strokeWidth="1.1" strokeLinecap="round" strokeOpacity="0.78" />
+        </g>
+
+        {/* Footer label */}
+        <g style={{ animation: "feat-fade-up 0.45s 0.75s ease-out both" }}>
+          <text x="185" y="112" textAnchor="middle" fontSize="5.2" fontWeight="700" fill="#0f766e" fillOpacity="0.76" letterSpacing="0.16em">
+            TAMPER-PROOF
+          </text>
         </g>
       </svg>
     </div>
