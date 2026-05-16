@@ -92,28 +92,28 @@ function BriefContent() {
         <div className="mb-2 text-sm text-teal-400 font-medium uppercase tracking-widest">
           Assessment Brief
         </div>
-        <h1 className="text-3xl font-bold mb-1">{brief.project_title}</h1>
-        <p className="text-gray-400 mb-6">Role: {data.roleTitle}</p>
+        <h1 className="text-4xl font-bold mb-1">{brief.project_title}</h1>
+        <p className="text-gray-400 text-lg mb-6">Role: {data.roleTitle}</p>
 
-        <div className="p-6 rounded-xl border border-white/10 bg-white/[0.02] mb-6">
-          <h2 className="font-semibold mb-3">Task</h2>
-          <p className="text-gray-300 text-sm leading-relaxed">{brief.task_description}</p>
+        <div className="p-8 rounded-xl border border-white/10 bg-white/[0.02] mb-6">
+          <h2 className="text-xl font-semibold mb-4">Task</h2>
+          <p className="text-gray-200 text-lg leading-relaxed">{brief.task_description}</p>
         </div>
 
         <div className="grid grid-cols-2 gap-4 mb-6">
-          <div className="p-4 rounded-xl border border-white/10 bg-white/[0.02]">
-            <div className="flex items-center gap-2 text-xs text-gray-500 mb-2">
-              <Clock className="w-3 h-3" /> DURATION
+          <div className="p-6 rounded-xl border border-white/10 bg-white/[0.02]">
+            <div className="flex items-center gap-2 text-xs text-gray-500 mb-2 uppercase tracking-widest">
+              <Clock className="w-4 h-4" /> DURATION
             </div>
-            <p className="font-semibold">{brief.expected_duration_minutes} minutes</p>
+            <p className="text-2xl font-bold">{brief.expected_duration_minutes} minutes</p>
           </div>
-          <div className="p-4 rounded-xl border border-white/10 bg-white/[0.02]">
-            <div className="flex items-center gap-2 text-xs text-gray-500 mb-2">
-              <Package className="w-3 h-3" /> MATERIALS
+          <div className="p-6 rounded-xl border border-white/10 bg-white/[0.02]">
+            <div className="flex items-center gap-2 text-xs text-gray-500 mb-2 uppercase tracking-widest">
+              <Package className="w-4 h-4" /> MATERIALS
             </div>
-            <ul className="text-sm text-gray-300 space-y-1">
+            <ul className="text-base text-gray-300 space-y-1">
               {brief.materials_needed.map((m, i) => (
-                <li key={i} className="truncate">{m}</li>
+                <li key={i} className="truncate">• {m}</li>
               ))}
             </ul>
           </div>
@@ -127,7 +127,7 @@ function BriefContent() {
             {brief.skills_being_tested.map((s, i) => (
               <span
                 key={i}
-                className="text-xs bg-teal-900/40 text-teal-300 border border-teal-700/50 rounded-full px-3 py-1"
+                className="text-sm bg-teal-900/40 text-teal-300 border border-teal-700/50 rounded-full px-4 py-1.5"
               >
                 {s}
               </span>
@@ -135,28 +135,12 @@ function BriefContent() {
           </div>
         </div>
 
-        <div className="mb-8">
-          <h3 className="text-sm font-medium text-gray-500 uppercase tracking-widest mb-3">
-            All Required Skills
-          </h3>
-          <div className="flex flex-wrap gap-2">
-            {data.requiredSkills.map((s, i) => (
-              <span
-                key={i}
-                className="text-xs bg-white/5 text-gray-300 border border-white/10 rounded-full px-3 py-1"
-              >
-                {s}
-              </span>
-            ))}
-          </div>
-        </div>
 
-        <div className="p-4 rounded-xl border border-amber-800/40 bg-amber-900/10 mb-8 flex gap-3">
-          <CheckCircle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
-          <div className="text-sm text-amber-200">
-            <strong>Before you start:</strong> Set up your workbench with the listed materials.
-            Your session will be recorded with continuous biometric identity lock.
-            Wear gloves — PPE compliance affects your safety score.
+        <div className="p-6 rounded-xl border border-amber-800/40 bg-amber-900/10 mb-8 flex gap-4">
+          <CheckCircle className="w-6 h-6 text-amber-400 flex-shrink-0 mt-0.5" />
+          <div className="text-base text-amber-200">
+            <strong className="block text-lg mb-1">Before you start:</strong> 
+            <p>Set up your workbench with the listed materials. Your session will be recorded with continuous biometric identity lock. Ensure your hands are clearly visible to the camera at all times.</p>
           </div>
         </div>
 

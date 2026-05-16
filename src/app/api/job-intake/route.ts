@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/firebase";
 import { collection, addDoc, serverTimestamp } from "firebase/firestore/lite";
@@ -33,15 +33,19 @@ Rules:
 - If you cannot extract meaningful skills from the image, return:
   { "error": "Could not extract skills — please try a clearer image or enter manually" }`;
 
-function buildBriefPrompt(roleTitle: string, requiredSkills: string[]): string {
+function buildBriefPrompt(roleTitle: string, requiredSkills: string[], duration: number): string {
+  const complexity = duration <= 5 ? "simple and fast" : duration <= 10 ? "moderate complexity" : "highly detailed and comprehensive";
+  
   return `You are VeriPro's Assessment Generator.
 Generate a hands-on practical project brief for a candidate applying for this role.
 
 Role: ${roleTitle}
 Required skills to assess: ${requiredSkills.join(", ")}
+Target Duration: ${duration} minutes
+Complexity level: ${complexity}
 
 The project must:
-- Be completable at a workbench in 15–30 minutes
+- Be strictly completable at a workbench in ${duration} minutes
 - Test 3–5 of the required skills through physical action
 - Require tools and components a training lab would have
 - Produce a visible, verifiable output (e.g. a wired terminal block, a tested circuit)
@@ -52,54 +56,71 @@ Return ONLY valid JSON:
   "project_title": "Short title (5-8 words)",
   "task_description": "2-3 sentences. Exactly what the candidate must do, step by step. Be specific about components and actions.",
   "materials_needed": ["component or tool 1", "component or tool 2"],
-  "expected_duration_minutes": 20,
+  "expected_duration_minutes": ${duration},
   "skills_being_tested": ["skill from required_skills list", "..."]
 }`;
 }
 
-
 export async function POST(req: NextRequest) {
   try {
-    const formData = await req.formData();
-    const file = formData.get("image") as File | null;
+    let roleTitle: string | null = null;
+    let requiredSkills: string[] = [];
+    let preferredSkills: string[] = [];
+    let rawDescription: string | null = null;
+    let duration = 15;
 
-    if (!file) {
-      return NextResponse.json({ error: "No image provided" }, { status: 400 });
-    }
+    const contentType = req.headers.get("content-type") || "";
 
-    const bytes = await file.arrayBuffer();
-    const base64 = Buffer.from(bytes).toString("base64");
-    const mimeType = file.type as "image/png" | "image/jpeg" | "application/pdf";
+    if (contentType.includes("application/json")) {
+      const body = await req.json();
+      roleTitle = body.roleTitle;
+      requiredSkills = body.requiredSkills || [];
+      duration = body.duration || 15;
+      rawDescription = "Manually entered skills";
+    } else {
+      const formData = await req.formData();
+      const file = formData.get("image") as File | null;
+      duration = Number(formData.get("duration") || 15);
 
-    const model = genAI.getGenerativeModel({ 
-      model: "gemini-2.5-flash",
-      generationConfig: { 
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: "object",
-          properties: {
-            role_title: { type: "string" },
-            required_skills: { type: "array", items: { type: "string" } },
-            preferred_skills: { type: "array", items: { type: "string" } },
-            raw_description: { type: "string" }
-          },
-          required: ["role_title", "required_skills", "raw_description"]
-        }
+      if (!file) {
+        return NextResponse.json({ error: "No image provided" }, { status: 400 });
       }
-    });
 
-    // Call 1: skill extraction
-    const extractResult = await model.generateContent([
-      { inlineData: { data: base64, mimeType } },
-      JOB_INTAKE_PROMPT,
-    ]);
-    const extracted = parseJSON(extractResult.response.text());
+      const bytes = await file.arrayBuffer();
+      const base64 = Buffer.from(bytes).toString("base64");
+      const mimeType = file.type as "image/png" | "image/jpeg" | "application/pdf";
 
-    if (!extracted.role_title) {
-      return NextResponse.json(
-        { error: "Failed to extract structured data from job posting" },
-        { status: 422 }
-      );
+      const model = genAI.getGenerativeModel({ 
+        model: "gemini-2.5-flash",
+        generationConfig: { 
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: SchemaType.OBJECT,
+            properties: {
+              role_title: { type: SchemaType.STRING },
+              required_skills: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
+              preferred_skills: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
+              raw_description: { type: SchemaType.STRING }
+            },
+            required: ["role_title", "required_skills", "raw_description"]
+          }
+        }
+      });
+
+      const extractResult = await model.generateContent([
+        { inlineData: { data: base64, mimeType } },
+        JOB_INTAKE_PROMPT,
+      ]);
+      const extracted = parseJSON(extractResult.response.text());
+
+      if (!extracted.role_title) {
+        return NextResponse.json({ error: "Failed to extract skills" }, { status: 422 });
+      }
+
+      roleTitle = extracted.role_title;
+      requiredSkills = extracted.required_skills;
+      preferredSkills = extracted.preferred_skills ?? [];
+      rawDescription = extracted.raw_description;
     }
 
     // Call 2: project brief
@@ -108,13 +129,13 @@ export async function POST(req: NextRequest) {
       generationConfig: {
         responseMimeType: "application/json",
         responseSchema: {
-          type: "object",
+          type: SchemaType.OBJECT,
           properties: {
-            project_title: { type: "string" },
-            task_description: { type: "string" },
-            materials_needed: { type: "array", items: { type: "string" } },
-            expected_duration_minutes: { type: "number" },
-            skills_being_tested: { type: "array", items: { type: "string" } }
+            project_title: { type: SchemaType.STRING },
+            task_description: { type: SchemaType.STRING },
+            materials_needed: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
+            expected_duration_minutes: { type: SchemaType.NUMBER },
+            skills_being_tested: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } }
           },
           required: ["project_title", "task_description", "materials_needed", "expected_duration_minutes", "skills_being_tested"]
         }
@@ -122,37 +143,31 @@ export async function POST(req: NextRequest) {
     });
 
     const briefResult = await briefModel.generateContent(
-      buildBriefPrompt(
-        extracted.role_title as string,
-        extracted.required_skills as string[]
-      )
+      buildBriefPrompt(roleTitle as string, requiredSkills, duration)
     );
     const brief = parseJSON(briefResult.response.text());
 
     if (!brief.project_title) {
-      return NextResponse.json(
-        { error: "Failed to generate assessment brief" },
-        { status: 422 }
-      );
+      return NextResponse.json({ error: "Failed to generate brief" }, { status: 422 });
     }
 
-    // Write to Firestore
     const docRef = await addDoc(collection(db, "jobPostings"), {
-      roleTitle: extracted.role_title,
-      requiredSkills: extracted.required_skills,
-      preferredSkills: extracted.preferred_skills ?? [],
-      rawDescription: extracted.raw_description,
+      roleTitle,
+      requiredSkills,
+      preferredSkills,
+      rawDescription,
       projectTitle: brief.project_title,
       projectBrief: brief,
+      targetDuration: duration,
       createdAt: serverTimestamp(),
     });
 
     return NextResponse.json({
       id: docRef.id,
-      roleTitle: extracted.role_title,
-      requiredSkills: extracted.required_skills,
-      preferredSkills: extracted.preferred_skills ?? [],
-      rawDescription: extracted.raw_description,
+      roleTitle,
+      requiredSkills,
+      preferredSkills,
+      rawDescription,
       projectTitle: brief.project_title,
       projectBrief: brief,
     });

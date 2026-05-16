@@ -24,12 +24,10 @@ function buildActionLog(events: Record<string, unknown>[]): string {
   return events
     .map((e) => {
       const safety = e.safetyAssessment as Record<string, unknown> | undefined;
-      const ppe = e.ppeCheck as Record<string, unknown> | undefined;
       const wq = e.workQuality as Record<string, unknown> | undefined;
       return (
         `[${e.timestamp}] ${e.action} (conf:${e.confidence}) — ${e.description}` +
         (safety ? ` | Safety:${safety.level} — ${safety.observation}` : "") +
-        (ppe ? ` | PPE:${ppe.gloves_worn}` : "") +
         (wq ? ` | Quality:${wq.rating}` : "")
       );
     })
@@ -101,15 +99,27 @@ async function writeResult(
 ) {
   await setSessionStatus(sessionId, "WRITING_CERTIFICATE");
 
-  // Compute T from criteria
+  // Compute T from criteria scores, and pass rate from benchmark checkboxes
+  const criteria = (evaluation.criteria ?? []) as { score: number; pass: boolean }[];
   const T =
-    evaluation.criteria?.length
-      ? evaluation.criteria.reduce((sum, c) => sum + c.score, 0) /
-        evaluation.criteria.length
+    criteria.length
+      ? criteria.reduce((sum, c) => sum + c.score, 0) / criteria.length
+      : 0;
+  const criteriaPassRate =
+    criteria.length
+      ? criteria.filter((c) => c.pass).length / criteria.length
       : 0;
 
-  // Deterministic sub-scores from frame data
-  const { S, Q, composite, safetyCapped } = computeComposite(T, actionEvents);
+  // Deterministic sub-scores from frame data + ecosystem signals
+  const { S, Q, E, Eco, T_adj, composite, safetyCapped, criticalViolationCount, liveWireContactDetected } = computeComposite(
+    T,
+    actionEvents,
+    criteriaPassRate,
+    evaluation.verdict,
+    evaluation.total_qualifying_actions ?? 0,
+    evaluation.ecosystem_readiness ?? null,
+    evaluation.key_actions ?? []
+  );
 
   const grade = computeGrade(composite, safetyCapped);
   const hireSignal = computeHireSignal(evaluation.verdict, composite, safetyCapped);
@@ -121,9 +131,10 @@ async function writeResult(
     sessionId,
     grade,
     compositeScore: Math.round(composite),
-    technicalScore: Math.round(T),
+    technicalScore: Math.round(T_adj),
     safetyScore: Math.round(S),
-    workQualityScore: Math.round(Q),
+    employerScore: Math.round(E),
+    ecosystemScore: Math.round(Eco),
     safetyCapped,
     skillsMatched: evaluation.skills_matched ?? [],
     benchmarkResults: evaluation.criteria ?? [],
@@ -146,10 +157,14 @@ async function writeResult(
     verdict: evaluation.verdict,
     grade,
     compositeScore: Math.round(composite),
-    technicalScore: Math.round(T),
+    technicalScore: Math.round(T_adj),
     safetyScore: Math.round(S),
     workQualityScore: Math.round(Q),
+    employerScore: Math.round(E),
+    ecosystemScore: Math.round(Eco),
     safetyCapped,
+    criticalViolationCount,
+    liveWireContactDetected,
     hireSignal,
     skillsMatched: evaluation.skills_matched ?? [],
     skillsMissing: evaluation.skills_missing ?? [],
@@ -159,6 +174,10 @@ async function writeResult(
     keyActions: evaluation.key_actions ?? [],
     benchmarkResults: evaluation.criteria ?? [],
     totalInteractions: evaluation.total_qualifying_actions,
+    ecosystemReadiness: evaluation.ecosystem_readiness ?? null,
+    programmeFitTags: evaluation.programme_fit_tags ?? [],
+    mentoringNeeds: evaluation.mentoring_needs ?? [],
+    linkageSignals: evaluation.linkage_signals ?? null,
     issuedFieldsSnapshot,
     sessionHash,
     issuedAt: serverTimestamp(),
@@ -183,6 +202,14 @@ async function writeResult(
         doc(db, "safetyReports", certRef.id),
         { ...safetyReport, sessionId, certificateId: certRef.id, createdAt: serverTimestamp() }
       );
+      // Surface key safety fields on the certificate itself so the page needs no extra read
+      await updateDoc(certRef, {
+        safetyLevel: safetyReport.overall_safety_level ?? null,
+        safetySummary: safetyReport.session_summary ?? null,
+        safetyStrengths: safetyReport.strengths ?? [],
+        safetyAreasForImprovement: safetyReport.areas_for_improvement ?? [],
+        safetyClosingRemark: safetyReport.lecturer_closing_remark ?? null,
+      });
     } catch (e) {
       console.error("Safety report generation failed:", e);
     }

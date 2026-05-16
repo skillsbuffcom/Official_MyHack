@@ -19,14 +19,16 @@ Reserve NO_ACTION for frames where hands are not visible at all.
 For any real electrical action (not HANDS_ONLY or NO_ACTION) with confidence >= 0.65,
 also evaluate:
 
-SAFETY:
-- safety_assessment.level: SAFE / CAUTION / UNSAFE
-- safety_assessment.observation: one specific sentence on what you see
-- safety_assessment.improvement_tip: one actionable safety correction; null if SAFE
+SAFETY — classify with strict thresholds:
+- SAFE: clear working posture, tool blade/tip directed away from hands, no energised conductor contact
+- CAUTION: tool angled toward body or wire but no imminent contact; minor posture risk
+- UNSAFE: tool blade or sharp tip within ~5 cm of bare skin; poor grip likely to slip; insulation stripped excessively exposing conductor
+- CRITICAL: any of the following — (1) cutting edge or sharp tip making or about to make contact with bare fingers/palm, (2) bare hand or finger contacting an uninsulated conductor that may be live, (3) probing live terminals without insulated probes. When in doubt between UNSAFE and CRITICAL, escalate to CRITICAL.
 
-PPE:
-- ppe_check.gloves_worn: whether protective gloves are visibly worn
-- ppe_check.remark: one sentence on PPE compliance
+For UNSAFE and CRITICAL, set violation_type:
+- "SHARP_TOOL_NEAR_HANDS": blade, stripper jaw, or cutter edge within immediate contact range of bare skin
+- "LIVE_WIRE_CONTACT": bare hand or uninsulated probe on exposed conductor
+- "TOOL_MISUSE": tool used in a way that creates immediate physical danger
 
 COMPLETION STATE:
 - completion: COMPLETE / ONGOING / PARTIAL
@@ -50,11 +52,11 @@ Output ONLY valid JSON. No text before or after.
   "work_quality": { "rating": "GOOD|ACCEPTABLE|POOR|null", "reason": "..." },
   "anomaly": "...|null",
   "safety_assessment": {
-    "level": "SAFE|CAUTION|UNSAFE|UNASSESSABLE",
+    "level": "SAFE|CAUTION|UNSAFE|CRITICAL|UNASSESSABLE",
+    "violation_type": "SHARP_TOOL_NEAR_HANDS|LIVE_WIRE_CONTACT|TOOL_MISUSE|null",
     "observation": "...|null",
     "improvement_tip": "...|null"
-  },
-  "ppe_check": { "gloves_worn": true, "remark": "...|null" }
+  }
 }`;
 
 export async function POST(req: NextRequest) {
@@ -83,8 +85,7 @@ export async function POST(req: NextRequest) {
       completion: null,
       work_quality: { rating: null, reason: null },
       anomaly: null,
-      safety_assessment: { level: "UNASSESSABLE", observation: null, improvement_tip: null },
-      ppe_check: { gloves_worn: "unclear", remark: null },
+      safety_assessment: { level: "UNASSESSABLE", violation_type: null, observation: null, improvement_tip: null },
     });
   }
 }

@@ -28,15 +28,11 @@ type ActionLogEntry = {
     observation: string | null;
     improvement_tip: string | null;
   };
-  ppeCheck?: {
-    gloves_worn: boolean | "unclear";
-    remark: string | null;
-  };
 };
 
 interface Hands {
   setOptions(options: unknown): void;
-  onResults(callback: (results: unknown) => void): void;
+  onResults(callback: (results: { multiHandLandmarks?: { x: number; y: number; z: number }[][] }) => void): void;
   send(input: { image: HTMLVideoElement }): Promise<void>;
   close(): void;
 }
@@ -109,7 +105,6 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
   const [isAnalyzingAction, setIsAnalyzingAction] = useState(false);
   const isAnalyzingActionRef = useRef(false);
   const actionIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const chunkIndexRef = useRef(0);
   const actionLogCounterRef = useRef(0);
   const actionLogScrollRef = useRef<HTMLDivElement>(null);
 
@@ -399,7 +394,6 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
             handsPresent: data.hands_present ?? false,
             workQuality: data.work_quality,
             safetyAssessment: data.safety_assessment,
-            ppeCheck: data.ppe_check,
           };
           setActionLog(prev => [...prev, entry]);
           
@@ -434,14 +428,10 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
     prevFlaggedRef.current = isFlagged;
   }, [isFlagged]);
 
-  const uploadChunk = useCallback((blob: Blob) => {
-    const chunkIndex = chunkIndexRef.current++;
-    const formData = new FormData();
-    formData.append("chunk", blob);
-    formData.append("chunkIndex", chunkIndex.toString());
-
-    fetch(`/api/session/${id}/upload-chunk`, { method: "POST", body: formData }).catch(() => {});
-  }, [id]);
+  const uploadChunk = useCallback(() => {
+    // Disabled for hackathon demo to avoid Firebase Storage configuration blockers.
+    // AI analysis remains functional via Base64 frame capture.
+  }, []);
 
   const initHands = useCallback(() => {
     if (typeof window === "undefined" || !(window as unknown as { Hands?: new (o: unknown) => Hands }).Hands || handsRef.current) return;
@@ -550,7 +540,9 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
 
         const recorder = new MediaRecorder(stream, { mimeType: "video/webm;codecs=vp8" });
         mediaRecorderRef.current = recorder;
-        recorder.ondataavailable = (e) => { if (e.data.size > 0) void uploadChunk(e.data); };
+        recorder.ondataavailable = () => { 
+          // if (e.data.size > 0) void uploadChunk(e.data); 
+        };
         recorder.start(10000);
         await fetch(`/api/session/${id}/recording-start`, { method: "POST" });
         actionIntervalRef.current = setInterval(() => { captureActionRef.current(); }, 10000);

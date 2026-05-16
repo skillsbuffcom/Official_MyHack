@@ -2,7 +2,6 @@
 import { useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Upload, FileImage, Loader2, AlertCircle } from "lucide-react";
-import { toast } from "sonner";
 
 export default function IntakePage() {
   const router = useRouter();
@@ -13,6 +12,7 @@ export default function IntakePage() {
   const [manualSkills, setManualSkills] = useState("");
   const [manualRole, setManualRole] = useState("");
   const [error, setError] = useState("");
+  const [duration, setDuration] = useState(15);
 
   const handleFile = useCallback(
     async (file: File) => {
@@ -30,6 +30,7 @@ export default function IntakePage() {
 
       const formData = new FormData();
       formData.append("image", file);
+      formData.append("duration", duration.toString());
 
       try {
         const res = await fetch("/api/job-intake", { method: "POST", body: formData });
@@ -47,7 +48,7 @@ export default function IntakePage() {
         setLoading(false);
       }
     },
-    [router]
+    [router, duration]
   );
 
   const onDrop = useCallback(
@@ -77,7 +78,7 @@ export default function IntakePage() {
       const res = await fetch("/api/job-intake", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ manual: true, roleTitle: manualRole, requiredSkills: skills }),
+        body: JSON.stringify({ manual: true, roleTitle: manualRole, requiredSkills: skills, duration }),
       });
       const data = await res.json();
       if (res.ok) {
@@ -103,6 +104,30 @@ export default function IntakePage() {
         <p className="text-gray-400 mb-8">
           Drag in a screenshot of any hands-on technical job posting. VeriPro will extract the required skills and generate a tailored assessment brief.
         </p>
+
+        {/* Duration Selector */}
+        <div className="mb-8 p-4 bg-white/[0.03] border border-white/10 rounded-xl">
+          <label className="block text-sm font-medium text-gray-300 mb-3">Project Duration & Complexity</label>
+          <div className="grid grid-cols-3 gap-3">
+            {[5, 10, 15].map((d) => (
+              <button
+                key={d}
+                type="button"
+                onClick={() => setDuration(d)}
+                className={`py-2 px-3 rounded-lg text-sm font-medium transition-all border ${
+                  duration === d
+                    ? "bg-teal-500/20 border-teal-500 text-teal-400"
+                    : "bg-white/5 border-white/10 text-gray-500 hover:border-white/20"
+                }`}
+              >
+                {d} mins
+                <span className="block text-[10px] opacity-60 font-normal">
+                  {d === 5 ? "Easy" : d === 10 ? "Medium" : "Hard"}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
 
         {!manualMode ? (
           <>

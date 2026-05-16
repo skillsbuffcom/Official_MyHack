@@ -3,70 +3,67 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
 // ─── JSON Parser Utility ──────────────────────────────────────────────────────
-export function parseJSON(text: string): Record<string, any> {
+// ─── JSON Parser Utility ──────────────────────────────────────────────────────
+export function parseJSON(text: string): Record<string, unknown> {
   try {
     let cleaned = text.trim().replace(/^```json\n?|\n?```$/g, "");
     
     // Attempt to fix common LLM JSON errors:
-    // 1. Remove trailing commas in arrays/objects
     cleaned = cleaned.replace(/,(\s*[\]}])/g, "$1");
-    
-    // 2. Fix weird newline quotes like: "string" \n ",
     cleaned = cleaned.replace(/"\s*\n\s*",/g, '",');
     
     return JSON.parse(cleaned);
   } catch {
     console.error("Failed to parse Gemini JSON:", text);
-    // Return a safe minimal object based on typical usage
     return {};
   }
 }
 
 // ─── Prompt: Action Detection (Robotics-ER) ───────────────────────────────────
 export const ROBOTICS_ER_PROMPT = `You are VeriPro's Physical Action Recognition Engine and Safety Observer.
-You analyze single frames from a hands-on electrical wiring practical session
-recorded on a smartphone or webcam pointed at a work bench.
-Work is performed on de-energized equipment. Hands are bare or in thin latex gloves.
+You analyze single frames from a hands-on electrical wiring practical session.
+Work is performed on de-energized equipment. Hands are bare for identity verification.
 
 Identify the specific electrical action being performed in this frame.
-If the worker is transitioning between actions (moving hands, repositioning wire),
-return HANDS_ONLY with confidence 0.3.
-Reserve NO_ACTION for frames where hands are not visible at all.
+If the worker is transitioning between actions (moving hands, repositioning wire), return HANDS_ONLY with confidence 0.3.
 
-For any real electrical action (not HANDS_ONLY or NO_ACTION) with confidence >= 0.65,
-also evaluate:
+SAFETY — classify with strict thresholds:
+- SAFE: clear working posture, tool blade/tip directed away from hands, no energised conductor contact
+- CAUTION: tool angled toward body or wire but no imminent contact; minor posture risk
+- UNSAFE: tool blade or sharp tip within ~5 cm of bare skin; poor grip likely to slip; insulation stripped excessively exposing conductor
+- CRITICAL: any of the following — (1) cutting edge or sharp tip making or about to make contact with bare fingers/palm, (2) bare hand or finger contacting an uninsulated conductor that may be live, (3) probing live terminals without insulated probes. When in doubt between UNSAFE and CRITICAL, escalate to CRITICAL.
 
-SAFETY:
-- safety_assessment.level: SAFE / CAUTION / UNSAFE
-- safety_assessment.observation: one specific sentence on what you see
-- safety_assessment.improvement_tip: one actionable safety correction; null if SAFE
-
-PPE:
-- ppe_check.gloves_worn: whether protective gloves are visibly worn
-- ppe_check.remark: one sentence on PPE compliance
+For UNSAFE and CRITICAL, also set violation_type:
+- "SHARP_TOOL_NEAR_HANDS": blade, stripper jaw, or cutter edge within immediate contact range of bare skin
+- "LIVE_WIRE_CONTACT": bare hand or uninsulated probe on exposed conductor
+- "TOOL_MISUSE": tool used in a way that creates immediate physical danger
 
 COMPLETION STATE:
 - completion: COMPLETE / ONGOING / PARTIAL
 
 WORK QUALITY:
 - work_quality.rating: GOOD / ACCEPTABLE / POOR
-- work_quality.reason: one sentence naming the specific quality indicator (e.g. strip length, screw engagement)
+- work_quality.reason: one sentence naming the specific quality indicator
 
 ANOMALY:
-- anomaly: one sentence if something is out of place (wrong tool, multiple hands). null if normal.
+- anomaly: one sentence if something is out of place. null if normal.
 
 Output ONLY valid JSON.
 {
   "action": "WIRE_STRIPPING|CABLE_TERMINATION|TERMINAL_BLOCK_WIRING|CONNECTOR_SEATING|CONTINUITY_TESTING|CIRCUIT_TESTING|CABLE_ROUTING|CONDUIT_INSERTION|EARTH_BONDING|INSULATION_TESTING|LABEL_APPLICATION|PANEL_ACCESS|SCREWDRIVER_TORQUE|HANDS_ONLY|NO_ACTION",
   "confidence": 0.0-1.0,
-  "description": "One sentence. Name the specific component and hand action.",
+  "description": "One sentence.",
   "hands_present": true|false,
   "tools_visible": ["tool names"],
   "completion": "COMPLETE|ONGOING|PARTIAL|null",
   "work_quality": { "rating": "GOOD|ACCEPTABLE|POOR|null", "reason": "string|null" },
   "anomaly": "string|null",
-  "safety_assessment": { "level": "SAFE|CAUTION|UNSAFE|UNASSESSABLE", "observation": "string", "improvement_tip": "string|null" },
-  "ppe_check": { "gloves_worn": true, "remark": "string" }
+  "safety_assessment": {
+    "level": "SAFE|CAUTION|UNSAFE|CRITICAL|UNASSESSABLE",
+    "violation_type": "SHARP_TOOL_NEAR_HANDS|LIVE_WIRE_CONTACT|TOOL_MISUSE|null",
+    "observation": "string",
+    "improvement_tip": "string|null"
+  }
 }`;
 
 // ─── Prompt: Session Evaluation ───────────────────────────────────────────────
@@ -89,6 +86,29 @@ and action descriptions as your evidence.
 If job posting skills are provided, assess which required skills were demonstrated
 and which were not observed.
 
+ECOSYSTEM LINKAGE:
+Beyond the hire signal, determine where this candidate sits in the broader ecosystem.
+- ecosystem_readiness: one of READY_FOR_EMPLOYMENT | READY_FOR_PROGRAMME | NEEDS_MENTORING | NOT_READY
+  - READY_FOR_EMPLOYMENT: strong performance, no critical gaps
+  - READY_FOR_PROGRAMME: competent but needs structured upskilling before employment
+  - NEEDS_MENTORING: clear skill gaps that a mentor can address in 1-on-1 sessions
+  - NOT_READY: fundamental gaps, needs foundational training first
+- programme_fit_tags: 2–4 short standardized tags for programme-matching engines
+  (e.g. "pre-employment", "hrdc-upskilling", "safety-remediation", "advanced-track", "entry-level")
+- mentoring_needs: for each missing/weak skill, produce a structured gap record
+- linkage_signals: structured facts for automated ecosystem matching
+
+KEY ACTION SCORING:
+For every notable action recorded, assign:
+- significance: HIGH (correct, complete, skilled execution — demonstrates mastery), MEDIUM (adequate but routine), LOW (partial, transitional, or unclear)
+- score: 0–100 matching the quality of that specific action
+  - HIGH → 80–100: precise technique, correct tool use, clean completion
+  - MEDIUM → 50–79: acceptable but not exemplary
+  - LOW → 0–49: incomplete, poor technique, or uncertain
+
+Key action scores are weighted directly into the candidate's Technical score.
+Include only actions with confidence ≥ 0.65 in key_actions (exclude HANDS_ONLY/NO_ACTION).
+
 OUTPUT — return ONLY valid JSON:
 {
   "certified": true,
@@ -97,7 +117,14 @@ OUTPUT — return ONLY valid JSON:
   "verdict_rationale": "One sentence citing specific evidence.",
   "reasons": ["Reason 1", "Reason 2"],
   "total_qualifying_actions": 0,
-  "key_actions": [{ "timestamp": "HH:MM:SS", "action": "description" }],
+  "key_actions": [
+    {
+      "timestamp": "HH:MM:SS",
+      "action": "description",
+      "significance": "HIGH|MEDIUM|LOW",
+      "score": 0
+    }
+  ],
   "criteria": [
     {
       "name": "Criterion name",
@@ -108,7 +135,17 @@ OUTPUT — return ONLY valid JSON:
   ],
   "skills_matched": ["skill names observed"],
   "skills_missing": ["skill names NOT observed"],
-  "employer_summary": "3-5 sentences for hiring manager."
+  "employer_summary": "3-5 sentences for hiring manager.",
+  "ecosystem_readiness": "READY_FOR_EMPLOYMENT|READY_FOR_PROGRAMME|NEEDS_MENTORING|NOT_READY",
+  "programme_fit_tags": ["pre-employment", "hrdc-upskilling"],
+  "mentoring_needs": [
+    { "skill_gap": "skill name", "priority": "HIGH|MEDIUM|LOW", "suggested_intervention": "one sentence" }
+  ],
+  "linkage_signals": {
+    "can_mentor_others_in": ["skills this candidate can already teach"],
+    "requires_mentor_for": ["skills needing 1-on-1 development"],
+    "eligible_programme_types": ["Pre-Employment|Upskilling|Certification Track|Remediation"]
+  }
 }`;
 
 // ─── Prompt: Safety Report ────────────────────────────────────────────────────
@@ -121,7 +158,6 @@ Output ONLY valid JSON:
   "overall_safety_level": "EXCELLENT|GOOD|NEEDS_IMPROVEMENT|UNSAFE",
   "overall_score": 0.0,
   "session_summary": "2-3 sentences. Cite at least 2 actions with timestamps.",
-  "ppe_summary": "One sentence on glove/PPE compliance.",
   "strengths": ["Action + timestamp + what was correct"],
   "areas_for_improvement": [
     {
@@ -133,13 +169,44 @@ Output ONLY valid JSON:
   "lecturer_closing_remark": "One encouraging closing statement."
 }`;
 
+export interface SessionEvaluation {
+  certified: boolean;
+  verdict: "CONFIRMED" | "PARTIAL" | "INCONSISTENT";
+  summary: string;
+  verdict_rationale: string;
+  reasons: string[];
+  total_qualifying_actions: number;
+  key_actions: Array<{ timestamp: string; action: string; significance: string; score: number }>;
+  criteria: Array<{ name: string; score: number; pass: boolean; justification: string }>;
+  skills_matched: string[];
+  skills_missing: string[];
+  employer_summary: string;
+  ecosystem_readiness: "READY_FOR_EMPLOYMENT" | "READY_FOR_PROGRAMME" | "NEEDS_MENTORING" | "NOT_READY" | null;
+  programme_fit_tags: string[];
+  mentoring_needs: Array<{ skill_gap: string; priority: string; suggested_intervention: string }>;
+  linkage_signals: {
+    can_mentor_others_in: string[];
+    requires_mentor_for: string[];
+    eligible_programme_types: string[];
+  } | null;
+}
+
+export interface SafetyReport {
+  overall_safety_level: "EXCELLENT" | "GOOD" | "NEEDS_IMPROVEMENT" | "UNSAFE";
+  overall_score: number;
+  session_summary: string;
+  strengths: string[];
+  areas_for_improvement: Array<{ area: string; observation: string; recommendation: string }>;
+  lecturer_closing_remark: string;
+}
+
 // ─── Logic: Session Evaluation ───────────────────────────────────────────────
 export async function evaluateSession(
   logText: string,
   taskClaim: string,
   flagCount: number,
   jobPostingSkills?: string[]
-): Promise<any> {
+): Promise<SessionEvaluation> {
   const skillsContext = jobPostingSkills?.length
     ? `\nJOB POSTING REQUIRED SKILLS TO ASSESS: ${jobPostingSkills.join(", ")}\n`
     : `\nNo job posting provided — derive 3–5 assessment criteria from the task claim: "${taskClaim}".\n`;
@@ -161,23 +228,27 @@ export async function evaluateSession(
 
   return {
     certified: Boolean(raw.certified),
-    verdict: raw.verdict ?? "INCONSISTENT",
-    summary: raw.summary ?? "",
-    verdict_rationale: raw.verdict_rationale ?? "",
-    reasons: raw.reasons ?? [],
+    verdict: (raw.verdict as SessionEvaluation["verdict"]) ?? "INCONSISTENT",
+    summary: (raw.summary as string) ?? "",
+    verdict_rationale: (raw.verdict_rationale as string) ?? "",
+    reasons: (raw.reasons as string[]) ?? [],
     total_qualifying_actions: Number(raw.total_qualifying_actions ?? 0),
-    key_actions: raw.key_actions ?? [],
-    criteria: raw.criteria ?? [],
-    skills_matched: raw.skills_matched ?? [],
-    skills_missing: raw.skills_missing ?? [],
-    employer_summary: raw.employer_summary ?? "",
+    key_actions: (raw.key_actions as SessionEvaluation["key_actions"]) ?? [],
+    criteria: (raw.criteria as SessionEvaluation["criteria"]) ?? [],
+    skills_matched: (raw.skills_matched as string[]) ?? [],
+    skills_missing: (raw.skills_missing as string[]) ?? [],
+    employer_summary: (raw.employer_summary as string) ?? "",
+    ecosystem_readiness: (raw.ecosystem_readiness as SessionEvaluation["ecosystem_readiness"]) ?? null,
+    programme_fit_tags: (raw.programme_fit_tags as string[]) ?? [],
+    mentoring_needs: (raw.mentoring_needs as SessionEvaluation["mentoring_needs"]) ?? [],
+    linkage_signals: (raw.linkage_signals as SessionEvaluation["linkage_signals"]) ?? null,
   };
 }
 
 // ─── Logic: Safety Report Synthesis ──────────────────────────────────────────
 export async function synthesizeSafetyReport(
-  observations: any[]
-): Promise<any> {
+  observations: Record<string, unknown>[]
+): Promise<SafetyReport> {
   const model = genAI.getGenerativeModel({ 
     model: "gemini-2.5-flash",
     generationConfig: { responseMimeType: "application/json" }
@@ -187,5 +258,14 @@ export async function synthesizeSafetyReport(
     "\n\nOBSERVATIONS:\n" +
     JSON.stringify(observations, null, 2);
   const result = await model.generateContent(prompt);
-  return parseJSON(result.response.text());
+  const raw = parseJSON(result.response.text());
+
+  return {
+    overall_safety_level: (raw.overall_safety_level as SafetyReport["overall_safety_level"]) ?? "NEEDS_IMPROVEMENT",
+    overall_score: Number(raw.overall_score ?? 0),
+    session_summary: (raw.session_summary as string) ?? "",
+    strengths: (raw.strengths as string[]) ?? [],
+    areas_for_improvement: (raw.areas_for_improvement as SafetyReport["areas_for_improvement"]) ?? [],
+    lecturer_closing_remark: (raw.lecturer_closing_remark as string) ?? "",
+  };
 }
