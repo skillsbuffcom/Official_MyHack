@@ -1,9 +1,10 @@
 "use client";
 import { Suspense, useState, useEffect } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { Loader2, CheckCircle, Clock, Package, ChevronLeft, ShieldCheck, Zap } from "lucide-react";
+import { Loader2, Clock, Package, ChevronLeft, ShieldCheck, Zap } from "lucide-react";
 import Link from "next/link";
 import { BrandMark } from "@/components/brand-mark";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 interface ProjectBrief {
   project_title: string;
@@ -79,15 +80,15 @@ function BriefContent() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#FDFDFF] flex items-center justify-center">
-        <Loader2 className="size-12 text-teal-500 animate-spin" />
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <Loader2 className="size-12 text-primary animate-spin" />
       </div>
     );
   }
 
   if (error || !data) {
     return (
-      <div className="min-h-screen bg-[#FDFDFF] flex items-center justify-center text-red-500 font-bold">
+      <div className="min-h-screen bg-background flex items-center justify-center text-destructive font-bold">
         {error || "Something went wrong."}
       </div>
     );
@@ -105,72 +106,54 @@ function BriefContent() {
   };
 
   return (
-    <div className="min-h-screen bg-[#FDFDFF] text-gray-900 font-sans selection:bg-teal-500/30 overflow-x-hidden relative">
-      {/* Grain Overlay */}
-      <div className="fixed inset-0 pointer-events-none z-[1] opacity-[0.03] contrast-150 brightness-100" style={{ backgroundImage: 'url("https://grainy-gradients.vercel.app/noise.svg")' }} />
-
-      {/* Technical Grid Overlay */}
-      <div className="fixed inset-0 pointer-events-none z-[0] opacity-[0.03] animate-[grid-scroll_60s_linear_infinite]" 
-           style={{ backgroundImage: 'radial-gradient(circle, #000 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
-
-      {/* Mesh Gradient Background */}
-      <div className="fixed inset-0 pointer-events-none overflow-hidden">
-        <div className="absolute top-[-10%] right-[-10%] w-[70%] h-[70%] bg-purple-200/20 rounded-full blur-[140px] animate-[drift_20s_infinite_linear]" />
-        <div className="absolute bottom-[-15%] left-[-5%] w-[60%] h-[60%] bg-teal-100/20 rounded-full blur-[120px] animate-[drift_25s_infinite_linear_reverse]" />
+    <div className="min-h-screen bg-background text-foreground font-sans selection:bg-primary/20 overflow-x-hidden relative transition-colors duration-300">
+      <div className="fixed inset-0 pointer-events-none">
+        <div className="absolute top-[-10%] right-[-10%] w-[70%] h-[70%] bg-primary/[0.04] rounded-full blur-[140px]" />
+        <div className="absolute bottom-[-15%] left-[-5%] w-[60%] h-[60%] bg-primary/[0.04] rounded-full blur-[120px]" />
       </div>
 
-      <style jsx>{`
-        @keyframes grid-scroll {
-          from { background-position: 0 0; }
-          to { background-position: 400px 400px; }
-        }
-        @keyframes drift {
-          0% { transform: translate(0, 0) rotate(0deg) scale(1); }
-          33% { transform: translate(5%, 10%) rotate(120deg) scale(1.1); }
-          66% { transform: translate(-5%, 5%) rotate(240deg) scale(0.9); }
-          100% { transform: translate(0, 0) rotate(360deg) scale(1); }
-        }
-      `}</style>
-
-      <nav className="relative z-50 border-b border-gray-200/50 bg-white/60 backdrop-blur-md">
-        <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
+      <nav className="relative z-50 border-b border-border bg-background/80 backdrop-blur-xl">
+        <div className="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
           <BrandMark />
-          <Link href="/intake" className="text-sm font-bold text-gray-500 hover:text-gray-900 flex items-center gap-2 transition-colors">
-            <ChevronLeft className="w-4 h-4" />
-            Upload Different Posting
-          </Link>
+          <div className="flex items-center gap-4">
+            <Link href="/intake" className="text-sm font-medium text-muted-foreground hover:text-foreground flex items-center gap-1.5 transition-colors">
+              <ChevronLeft className="w-4 h-4" />
+              Upload Different Posting
+            </Link>
+            <ThemeToggle />
+          </div>
         </div>
       </nav>
 
-      <main className="relative z-10 max-w-2xl mx-auto px-6 py-20">
-        <div className="space-y-4 mb-10">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-purple-500/10 border border-purple-500/20 text-[10px] font-bold uppercase tracking-widest text-purple-600">
+      <main className="relative z-10 max-w-2xl mx-auto px-6 py-16">
+        <div className="space-y-3 mb-10">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 text-[10px] font-bold uppercase tracking-widest text-primary">
             Step 2: Assessment Brief
           </div>
-          <h1 className="text-4xl md:text-5xl font-bold tracking-tight text-gray-950">
+          <h1 className="text-4xl md:text-5xl font-black tracking-tight text-foreground">
             {brief.project_title}
           </h1>
-          <p className="text-lg text-gray-500 font-medium">Target Role: {data.roleTitle}</p>
+          <p className="text-lg text-muted-foreground font-medium">Target Role: {data.roleTitle}</p>
         </div>
 
-        <div className="space-y-6">
-          <div className="p-8 rounded-[2.5rem] bg-white/40 backdrop-blur-md border border-white/60 shadow-xl">
-            <h2 className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-4">The Mission</h2>
-            <p className="text-gray-700 leading-relaxed font-medium">{brief.task_description}</p>
+        <div className="space-y-5">
+          <div className="p-8 rounded-2xl bg-card border border-border">
+            <h2 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-4">The Mission</h2>
+            <p className="text-foreground leading-relaxed">{brief.task_description}</p>
           </div>
 
-          <div className="grid grid-cols-2 gap-6">
-            <div className="p-6 rounded-[2rem] bg-white/40 backdrop-blur-md border border-white/60 shadow-lg">
-              <div className="flex items-center gap-2 text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3">
-                <Clock className="size-4 text-teal-500" /> DURATION
+          <div className="grid grid-cols-2 gap-4">
+            <div className="p-6 rounded-2xl bg-card border border-border">
+              <div className="flex items-center gap-2 text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-3">
+                <Clock className="size-4 text-primary" /> Duration
               </div>
-              <p className="text-xl font-bold text-gray-950">{brief.expected_duration_minutes} Minutes</p>
+              <p className="text-xl font-bold text-foreground">{brief.expected_duration_minutes} Minutes</p>
             </div>
-            <div className="p-6 rounded-[2rem] bg-white/40 backdrop-blur-md border border-white/60 shadow-lg">
-              <div className="flex items-center gap-2 text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3">
-                <Package className="size-4 text-purple-500" /> MATERIALS
+            <div className="p-6 rounded-2xl bg-card border border-border">
+              <div className="flex items-center gap-2 text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-3">
+                <Package className="size-4 text-primary" /> Materials
               </div>
-              <ul className="text-sm font-bold text-gray-600 space-y-1">
+              <ul className="text-sm font-medium text-muted-foreground space-y-1">
                 {brief.materials_needed.map((m, i) => (
                   <li key={i} className="truncate">• {m}</li>
                 ))}
@@ -178,31 +161,31 @@ function BriefContent() {
             </div>
           </div>
 
-          <div className="space-y-4">
-             <h3 className="text-xs font-bold uppercase tracking-widest text-gray-400 ml-1">Skills Being Audited</h3>
-             <div className="flex flex-wrap gap-3">
-                {brief.skills_being_tested.map((s, i) => (
-                  <div key={i} className="px-4 py-2 rounded-xl bg-teal-500/10 border border-teal-500/20 text-xs font-bold text-teal-600">
-                    {s}
-                  </div>
-                ))}
-             </div>
+          <div className="space-y-3">
+            <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Skills Being Audited</h3>
+            <div className="flex flex-wrap gap-2">
+              {brief.skills_being_tested.map((s, i) => (
+                <div key={i} className="px-4 py-1.5 rounded-full bg-primary/10 border border-primary/20 text-xs font-semibold text-primary">
+                  {s}
+                </div>
+              ))}
+            </div>
           </div>
 
-          <div className="p-6 rounded-[2rem] bg-amber-50 border border-amber-100 flex gap-4 shadow-sm">
-            <ShieldCheck className="size-6 text-amber-500 shrink-0" />
-            <div className="text-sm text-amber-900 leading-relaxed">
-              <strong>Identity Protocol:</strong> Your session will be recorded with <strong>continuous bare-hand biometric lock</strong>. 
-              Do not wear gloves — physical markers must be visible for forensic validation.
-            </div>
+          <div className="p-5 rounded-2xl bg-amber-400/20 dark:bg-amber-500/[0.08] border border-amber-400 dark:border-amber-500/25 flex gap-4">
+            <ShieldCheck className="size-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+            <p className="text-sm text-amber-900 dark:text-amber-200 leading-relaxed">
+              <strong>Identity Protocol:</strong> Your session will be recorded with{" "}
+              <strong>continuous bare-hand biometric lock</strong>. Do not wear gloves — physical markers must be visible for forensic validation.
+            </p>
           </div>
 
           <button
             onClick={handleStart}
-            className="w-full bg-gradient-to-r from-teal-500 to-purple-600 hover:from-teal-400 hover:to-purple-500 text-white font-bold h-16 rounded-[1.5rem] transition-all shadow-xl shadow-teal-500/20 flex items-center justify-center gap-3 text-lg"
+            className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-bold h-14 rounded-2xl transition-colors shadow-lg shadow-primary/20 flex items-center justify-center gap-2 text-[15px]"
           >
             Start Verified Session
-            <Zap className="size-5 fill-current" />
+            <Zap className="size-4 fill-current" />
           </button>
         </div>
       </main>
@@ -214,8 +197,8 @@ export default function BriefPage() {
   return (
     <Suspense
       fallback={
-        <div className="min-h-screen bg-[#FDFDFF] flex items-center justify-center">
-          <Loader2 className="size-12 text-teal-500 animate-spin" />
+        <div className="min-h-screen bg-background flex items-center justify-center">
+          <Loader2 className="size-12 text-primary animate-spin" />
         </div>
       }
     >

@@ -1,7 +1,8 @@
 "use client";
 import { use, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { CheckCircle, AlertCircle, Camera } from "lucide-react";
+import { CheckCircle, AlertCircle } from "lucide-react";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 export default function SetupPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -16,17 +17,20 @@ export default function SetupPage({ params }: { params: Promise<{ id: string }> 
   if (hasProfile === null) return null;
 
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100 flex flex-col items-center justify-center px-4 py-12">
+    <div className="min-h-screen bg-background text-foreground flex flex-col items-center justify-center px-6 py-12 transition-colors duration-300">
+      <div className="fixed top-6 right-6">
+        <ThemeToggle />
+      </div>
       <div className="max-w-md w-full">
         <div className="mb-6 text-center">
-          <div className="text-xs text-gray-500 uppercase tracking-widest mb-2">Step 2 of 3</div>
+          <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-2">Step 2 of 3</div>
           <h1 className="text-2xl font-bold">Ready to Record</h1>
-          <p className="text-gray-400 text-sm mt-2">
+          <p className="text-muted-foreground text-sm mt-2">
             Review the checklist before starting your session.
           </p>
         </div>
 
-        <div className="space-y-3 mb-8">
+        <div className="space-y-2 mb-8">
           {[
             { ok: hasProfile, label: "Biometric registration complete" },
             { ok: true, label: "Camera positioned at work bench" },
@@ -34,11 +38,11 @@ export default function SetupPage({ params }: { params: Promise<{ id: string }> 
             { ok: true, label: "Wearing protective gloves (PPE)" },
             { ok: true, label: "Working area well-lit and clear" },
           ].map(({ ok, label }, i) => (
-            <div key={i} className="flex items-center gap-3 p-3 rounded-lg border border-white/10 bg-white/[0.02]">
+            <div key={i} className="flex items-center gap-3 p-3 rounded-xl border border-border bg-card">
               {ok ? (
-                <CheckCircle className="w-5 h-5 text-teal-400 shrink-0" />
+                <CheckCircle className="w-5 h-5 text-primary shrink-0" />
               ) : (
-                <AlertCircle className="w-5 h-5 text-red-400 shrink-0" />
+                <AlertCircle className="w-5 h-5 text-destructive shrink-0" />
               )}
               <span className="text-sm">{label}</span>
             </div>
@@ -46,7 +50,7 @@ export default function SetupPage({ params }: { params: Promise<{ id: string }> 
         </div>
 
         {!hasProfile && (
-          <div className="mb-4 p-4 rounded-xl border border-red-800/40 bg-red-900/10 text-sm text-red-300">
+          <div className="mb-4 p-4 rounded-xl border border-destructive/20 bg-destructive/[0.05] text-sm text-destructive">
             Biometric registration is missing. Please complete hand registration first.
           </div>
         )}
@@ -54,14 +58,14 @@ export default function SetupPage({ params }: { params: Promise<{ id: string }> 
         {hasProfile ? (
           <button
             onClick={() => router.push(`/session/${id}/record`)}
-            className="w-full bg-teal-500 hover:bg-teal-400 text-gray-950 font-semibold py-4 rounded-xl text-lg transition-colors"
+            className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-semibold py-4 rounded-xl text-lg transition-colors shadow-lg shadow-primary/20"
           >
             Start Recording →
           </button>
         ) : (
           <button
             onClick={() => router.push(`/session/${id}/verify`)}
-            className="w-full border border-white/20 hover:border-white/40 py-4 rounded-xl transition-colors"
+            className="w-full border border-border hover:bg-muted/50 py-4 rounded-xl transition-colors font-medium text-muted-foreground"
           >
             Complete Registration First
           </button>

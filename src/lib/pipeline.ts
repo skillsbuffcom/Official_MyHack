@@ -1,6 +1,6 @@
 import { db } from "@/lib/firebase";
 import { evaluateSession, synthesizeSafetyReport } from "@/lib/gemini";
-import { computeCompositeScore, ScoringInput } from "@/lib/scoring";
+import { computeComposite } from "@/lib/scoring";
 import {
   collection,
   doc,
@@ -154,19 +154,12 @@ async function writeResult(
     projectTitle: session.taskClaim,
     verdict: evaluation.verdict,
     grade,
-<<<<<<< HEAD
     compositeScore: Math.round(composite),
     technicalScore: Math.round(T_adj),
     safetyScore: Math.round(S),
     workQualityScore: Math.round(Q),
     employerScore: Math.round(E),
     ecosystemScore: Math.round(Eco),
-=======
-    compositeScore: Math.round(compositeScore),
-    technicalScore: Math.round(technicalScore),
-    safetyScore: Math.round(safetyScore),
-    workQualityScore: Math.round(workQualityScore),
->>>>>>> 08bcee1 (feat: Luxury Premium UI overhaul and Forensic Dual-Hand verification logic)
     safetyCapped,
     criticalViolationCount,
     liveWireContactDetected,

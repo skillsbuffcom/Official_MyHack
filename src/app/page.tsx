@@ -1,102 +1,233 @@
 import Link from "next/link";
-import { Shield, Zap, Award, Upload, ChevronRight } from "lucide-react";
+import { Shield, Zap, Award, Upload, ChevronRight, Lock, FileCheck, Fingerprint } from "lucide-react";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { BrandMark } from "@/components/brand-mark";
 
 export default function LandingPage() {
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100">
-      {/* Nav */}
-      <nav className="border-b border-white/5 px-6 py-4 flex items-center justify-between">
-        <span className="font-bold text-lg tracking-tight">VeriPro</span>
-        <div className="flex gap-4 text-sm text-gray-400">
-          <Link href="/intake" className="hover:text-white transition-colors">
-            Get Verified
-          </Link>
+    <div className="min-h-screen bg-background text-foreground antialiased selection:bg-teal-500/20">
+
+      {/* ── Nav ── */}
+      <nav className="fixed top-0 inset-x-0 z-50 h-14 flex items-center
+        border-b border-border
+        bg-background/80 backdrop-blur-2xl">
+        <div className="max-w-6xl w-full mx-auto px-6 flex items-center justify-between">
+          <BrandMark />
+          <div className="flex items-center gap-3">
+            <ThemeToggle />
+            <Link
+              href="/intake"
+              className="inline-flex items-center gap-1.5 text-sm font-semibold px-4 py-1.5 rounded-full
+                bg-foreground text-background
+                hover:bg-foreground/90 transition-colors duration-200"
+            >
+              Get verified <ChevronRight className="size-3.5" />
+            </Link>
+          </div>
         </div>
       </nav>
 
-      {/* Hero */}
-      <section className="px-6 py-24 text-center max-w-3xl mx-auto">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-teal-900/40 border border-teal-700/50 text-teal-400 text-xs font-medium mb-6">
-          <Shield className="w-3 h-3" />
-          Biometrically verified · Safety-graded · SHA-256 tamper-evident
+      {/* ── Hero ── */}
+      <section className="relative flex flex-col items-center text-center px-6 pt-[7.5rem] pb-16 md:pt-[9.5rem] md:pb-24 overflow-hidden">
+
+        {/* Ambient background */}
+        <div className="absolute inset-0 pointer-events-none">
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[900px] h-[600px]
+            bg-teal-500/[0.07] dark:bg-teal-500/[0.05] rounded-full blur-[140px]" />
+          <div
+            className="absolute inset-0 opacity-[0.025] dark:opacity-[0.04]"
+            style={{ backgroundImage: "radial-gradient(circle, currentColor 1px, transparent 1px)", backgroundSize: "32px 32px" }}
+          />
         </div>
-        <h1 className="text-5xl font-bold tracking-tight mb-6 leading-tight">
-          Turn any job posting into a{" "}
-          <span className="text-teal-400">verified practical assessment</span>
+
+        {/* Badge */}
+        <div className="relative inline-flex items-center gap-2 px-3.5 py-1.5 mb-8 rounded-full
+          border border-primary/25 bg-primary/[0.06]
+          text-primary text-xs font-semibold tracking-wide">
+          <span className="size-1.5 rounded-full bg-primary animate-pulse" />
+          Biometric · AI-graded · SHA-256 tamper-evident
+        </div>
+
+        {/* H1 */}
+        <h1 className="relative max-w-4xl text-[clamp(48px,8vw,88px)] leading-[1.0] font-black tracking-[-0.04em] mb-6">
+          Turn any job posting into{" "}
+          <span className="text-primary">
+            verified proof.
+          </span>
         </h1>
-        <p className="text-xl text-gray-400 mb-10 leading-relaxed">
+
+        {/* Subheadline */}
+        <p className="text-xl text-muted-foreground mb-6 leading-relaxed max-w-xl">
           Upload a job posting. VeriPro generates a tailored project brief,
           observes your hands-on session with continuous biometric identity lock,
           and issues a tamper-evident certificate your employer can read in 30 seconds.
         </p>
-        <Link
-          href="/intake"
-          className="group relative inline-flex items-center gap-2 px-8 py-4 rounded-2xl text-lg font-semibold text-teal-50 transition-all duration-300
-            bg-teal-400/20 backdrop-blur-xl border border-teal-400/30
-            shadow-[0_8px_32px_rgba(45,212,191,0.15),inset_0_1px_0_rgba(255,255,255,0.2),inset_0_-1px_0_rgba(0,0,0,0.1)]
-            hover:bg-teal-400/30 hover:border-teal-400/50 hover:shadow-[0_12px_40px_rgba(45,212,191,0.25),inset_0_1px_0_rgba(255,255,255,0.3),inset_0_-1px_0_rgba(0,0,0,0.15)]
-            active:scale-[0.98] active:shadow-[0_4px_16px_rgba(45,212,191,0.15)]"
-        >
-          <span className="absolute inset-0 rounded-2xl bg-gradient-to-b from-teal-300/20 to-transparent pointer-events-none" />
-          <Upload className="w-5 h-5 relative z-10 drop-shadow-sm" />
-          <span className="relative z-10 drop-shadow-sm">Upload a Job Posting</span>
-        </Link>
+
+        {/* CTAs */}
+        <div className="relative flex flex-col gap-2 items-center">
+          <Link
+            href="/intake"
+            className="group relative inline-flex items-center gap-2 px-10 py-4 rounded-2xl text-[16px] font-semibold
+              text-background dark:text-background transition-all duration-300
+              bg-foreground
+              hover:bg-foreground/90
+              active:scale-[0.98] shadow-xl shadow-foreground/10"
+          >
+            <Upload className="size-4 relative z-10" />
+            <span className="relative z-10">Prove what you can do</span>
+          </Link>
+          <a
+            href="#how"
+            className="inline-flex items-center gap-1.5 text-[15px] font-medium
+              text-muted-foreground hover:text-foreground
+              transition-colors duration-200"
+          >
+            How it works <ChevronRight className="size-4" />
+          </a>
+        </div>
+
+        {/* Scroll hint */}
+        <div className="absolute bottom-10 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 opacity-30">
+          <div className="w-px h-12 bg-foreground/20 animate-pulse" />
+        </div>
       </section>
 
-      {/* How it works */}
-      <section className="px-6 py-16 max-w-6xl mx-auto">
-        <h2 className="text-2xl font-bold text-center mb-12">How it works</h2>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-12">
+      {/* ── Trust bar ── */}
+      <div className="border-y border-border py-8 bg-muted/5">
+        <div className="max-w-6xl mx-auto px-6 flex flex-wrap justify-center gap-x-16 gap-y-8">
           {[
-            { icon: Upload, step: "1", title: "Upload posting", desc: "Drag in any job posting screenshot — PNG, JPG, or PDF" },
-            { icon: Zap, step: "2", title: "AI generates brief", desc: "Gemini extracts required skills and builds a tailored project" },
-            { icon: Shield, step: "3", title: "Complete session", desc: "Work at your bench — continuous biometric identity lock throughout" },
-            { icon: Award, step: "4", title: "Get certificate", desc: "SHA-256 hashed certificate with composite grade and hire signal" },
-          ].map(({ icon: Icon, step, title, desc }) => (
-            <div key={step} className="glow-border relative p-6">
-              <div className="text-xs font-bold text-teal-400 mb-3">STEP {step}</div>
-              <Icon className="w-6 h-6 text-teal-400 mb-3" />
-              <h3 className="font-semibold mb-2">{title}</h3>
-              <p className="text-sm text-gray-400 leading-relaxed">{desc}</p>
-              {step !== "4" && (
-                <ChevronRight className="hidden md:block absolute -right-9 top-1/2 -translate-y-1/2 w-6 h-6 text-gray-700" />
-              )}
+            { value: "3-Layer", label: "Biometric Identity Lock" },
+            { value: "SHA-256", label: "Tamper-Evident Hash" },
+            { value: "30 Sec", label: "Employer Verification" },
+            { value: "AI-Graded", label: "Deterministic Benchmark" },
+          ].map(({ value, label }, i) => (
+            <div key={value} className="flex items-center gap-16">
+              <div className="flex flex-col items-center md:items-start">
+                <p className="text-2xl font-black tracking-tighter text-foreground mb-1">{value}</p>
+                <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-muted-foreground/70">{label}</p>
+              </div>
+              {i < 3 && <div className="hidden lg:block w-px h-8 bg-border" />}
             </div>
           ))}
         </div>
+      </div>
+
+      {/* ── How it works ── */}
+      <section id="how" className="py-28 px-6">
+        <div className="max-w-6xl mx-auto">
+
+          <div className="text-center mb-16">
+            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-primary mb-3">How it works</p>
+            <h2 className="text-4xl font-black tracking-[-0.03em]">Four steps to verified.</h2>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+            {[
+              { icon: Upload,  step: "01", title: "Upload Posting",    desc: "Drop any job posting — PNG, JPG, or PDF. VeriPro extracts required skills automatically." },
+              { icon: Zap,     step: "02", title: "AI Builds Brief",   desc: "Gemini maps skills into a tailored practical project brief in seconds." },
+              { icon: Shield,  step: "03", title: "Biometric Session", desc: "Work at your bench under continuous face, hand, and activity identity lock." },
+              { icon: Award,   step: "04", title: "Get Certificate",   desc: "Receive a SHA-256 signed certificate with composite grade and hire signal." },
+            ].map(({ icon: Icon, step, title, desc }) => (
+              <div key={step} className="relative group">
+                <div className="relative p-8 rounded-[2rem] h-full
+                  border border-border
+                  bg-card
+                  hover:border-primary/40
+                  hover:shadow-2xl hover:shadow-primary/5
+                  transition-all duration-300">
+                  <div className="text-[10px] font-black text-primary/60 mb-4 tracking-[0.2em]">STEP {step}</div>
+                  <Icon className="size-8 text-primary mb-6" />
+                  <h3 className="text-xl font-black mb-3 text-foreground tracking-tight">{title}</h3>
+                  <p className="text-[15px] text-muted-foreground leading-relaxed font-medium">{desc}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       </section>
 
-      {/* Value prop */}
-      <section className="px-6 py-16 max-w-4xl mx-auto grid md:grid-cols-2 gap-8">
-        <div className="p-8 rounded-xl border border-teal-800/40 bg-teal-900/10">
-          <h3 className="font-bold text-lg mb-4 text-teal-300">For Candidates</h3>
-          <ul className="space-y-3 text-sm text-gray-300">
-            <li className="flex gap-2"><span className="text-teal-400">✓</span> Portable proof of practical competence</li>
-            <li className="flex gap-2"><span className="text-teal-400">✓</span> Tailored to the exact job you want</li>
-            <li className="flex gap-2"><span className="text-teal-400">✓</span> Shareable portfolio link on your resume</li>
-            <li className="flex gap-2"><span className="text-teal-400">✓</span> AI coaching after every session</li>
-          </ul>
-        </div>
-        <div className="p-8 rounded-xl border border-purple-800/40 bg-purple-900/10">
-          <h3 className="font-bold text-lg mb-4 text-purple-300">For Employers & Admins</h3>
-          <ul className="space-y-3 text-sm text-gray-300">
-            <li className="flex gap-2"><span className="text-purple-400">✓</span> Read grade + safety score in 30 seconds</li>
-            <li className="flex gap-2"><span className="text-purple-400">✓</span> Safety is never hidden behind technical score</li>
-            <li className="flex gap-2"><span className="text-purple-400">✓</span> SHA-256 tamper evidence — cannot be faked</li>
-            <li className="flex gap-2"><span className="text-purple-400">✓</span> Consistent assessments across entire cohorts</li>
-          </ul>
+      {/* ── Features list ── */}
+      <section className="py-28 px-6 bg-muted/20">
+        <div className="max-w-5xl mx-auto">
+
+          <div className="text-center mb-16">
+            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-primary mb-3">Built different</p>
+            <h2 className="text-4xl font-black tracking-[-0.03em]">Every layer. Verified.</h2>
+          </div>
+
+          <div className="rounded-3xl border border-border overflow-hidden divide-y divide-border">
+            {[
+              { icon: Fingerprint, title: "3-Layer Biometric Lock",       tag: "Identity",      desc: "Face recognition, hand-presence detection, and continuous activity monitoring. The person who starts is the person who finishes — guaranteed." },
+              { icon: Zap,         title: "AI-Powered Assessment",         tag: "Gemini AI",     desc: "Gemini extracts required skills from any job posting and builds a deterministic practical brief tailored to the exact role — in seconds." },
+              { icon: Lock,        title: "SHA-256 Cryptographic Seal",    tag: "Cryptography",  desc: "Every certificate is hashed and signed at issuance. Cannot be altered, duplicated, or fabricated. Mathematical proof of authenticity." },
+              { icon: FileCheck,   title: "30-Second Employer Read",       tag: "Hiring",        desc: "Composite grade, hire signal, safety score, and skills breakdown. Any employer can make a confident decision in half a minute." },
+            ].map(({ icon: Icon, title, tag, desc }) => (
+              <div
+                key={title}
+                className="group flex flex-col sm:flex-row sm:items-center gap-5 sm:gap-8 px-8 py-7
+                  bg-card hover:bg-primary/[0.02] transition-colors duration-200"
+              >
+                <Icon className="size-5 text-primary shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <h3 className="font-black text-[17px] tracking-tight text-foreground leading-tight">{title}</h3>
+                  <p className="text-sm text-muted-foreground mt-1 leading-relaxed">{desc}</p>
+                </div>
+                <span className="self-start sm:self-center shrink-0 text-[10px] font-bold uppercase tracking-[0.15em]
+                  px-3 py-1.5 rounded-full border border-border text-muted-foreground
+                  group-hover:border-primary/40 group-hover:text-primary transition-colors duration-200">
+                  {tag}
+                </span>
+              </div>
+            ))}
+          </div>
+
         </div>
       </section>
 
-      {/* Trust */}
-      <section className="px-6 py-16 border-t border-white/5 text-center">
-        <div className="flex flex-wrap justify-center gap-8 text-sm text-gray-500">
-          <div className="flex items-center gap-2"><Shield className="w-4 h-4 text-teal-500" />3-layer biometric identity lock</div>
-          <div className="flex items-center gap-2"><Shield className="w-4 h-4 text-teal-500" />Safety-inclusive composite grading</div>
-          <div className="flex items-center gap-2"><Shield className="w-4 h-4 text-teal-500" />SHA-256 tamper-evident certificates</div>
+      {/* ── Value props ── */}
+      <section className="py-28 px-6">
+        <div className="max-w-6xl mx-auto">
+
+          <div className="text-center mb-16">
+            <h2 className="text-4xl font-black tracking-[-0.03em]">Built for both sides of the table.</h2>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-4">
+
+            <div className="p-8 rounded-xl border border-teal-500/20 bg-teal-500/5 dark:border-teal-800/40 dark:bg-teal-900/10">
+              <h3 className="font-bold text-lg mb-4 text-primary">For Candidates</h3>
+              <ul className="space-y-3 text-sm text-muted-foreground">
+                <li className="flex gap-2"><span className="text-primary">✓</span> Portable proof of practical competence</li>
+                <li className="flex gap-2"><span className="text-primary">✓</span> Tailored to the exact job you want</li>
+                <li className="flex gap-2"><span className="text-primary">✓</span> Shareable portfolio link on your resume</li>
+                <li className="flex gap-2"><span className="text-primary">✓</span> AI coaching after every session</li>
+              </ul>
+            </div>
+            <div className="p-8 rounded-xl border border-teal-500/20 bg-teal-500/5 dark:border-teal-800/40 dark:bg-teal-900/10">
+              <h3 className="font-bold text-lg mb-4 text-primary">For Employers & Admins</h3>
+              <ul className="space-y-3 text-sm text-muted-foreground">
+                <li className="flex gap-2"><span className="text-primary">✓</span> Read grade + safety score in 30 seconds</li>
+                <li className="flex gap-2"><span className="text-primary">✓</span> Safety is never hidden behind technical score</li>
+                <li className="flex gap-2"><span className="text-primary">✓</span> SHA-256 tamper evidence — cannot be faked</li>
+                <li className="flex gap-2"><span className="text-primary">✓</span> Consistent assessments across entire cohorts</li>
+              </ul>
+            </div>
+
+          </div>
         </div>
-        <p className="mt-8 text-xs text-gray-600">VeriPro · 24-hour Hackathon Sprint · Cradle Fund Demo</p>
       </section>
+
+      {/* ── Footer ── */}
+      <footer className="border-t border-border py-8 px-6">
+        <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-muted-foreground">
+          <BrandMark />
+          <div className="flex items-center gap-6">
+            <Link href="/intake" className="hover:text-foreground transition-colors">Get Verified</Link>
+          </div>
+          <p>VeriPro · 24-hour Hackathon Sprint · Cradle Fund Demo</p>
+        </div>
+      </footer>
+
     </div>
   );
 }
