@@ -1,250 +1,296 @@
-"use client";
-import { Fragment, useState, useEffect, use } from "react";
+import { db } from "@/lib/firebase";
+import { collection, query, where, orderBy, getDocs, Timestamp } from "firebase/firestore/lite";
+import { Award, Shield, Calendar, Copy, ExternalLink } from "lucide-react";
 import Link from "next/link";
-import { 
-  ShieldCheck, 
-  ExternalLink, 
-  Award, 
-  Calendar, 
-  Copy, 
-  ChevronRight,
-  User,
-  Activity,
-  Loader2,
-  CheckCircle2,
-  ChevronLeft
-} from "lucide-react";
-import { BrandMark } from "@/components/brand-mark";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { toast } from "sonner";
+import type { Metadata } from "next";
+import { CopyLinkButton } from "@/components/profile/CopyLinkButton";
 
-// Grade badge styles
-const gradeStyles: Record<string, string> = {
-  A: "bg-emerald-500/10 text-emerald-600 border-emerald-500/20",
-  B: "bg-teal-500/10 text-teal-600 border-teal-500/20",
-  C: "bg-amber-500/10 text-amber-600 border-amber-500/20",
-  D: "bg-orange-500/10 text-orange-600 border-orange-500/20",
-  F: "bg-red-500/10 text-red-600 border-red-500/20",
+export const dynamic = 'force-dynamic';
+
+interface CertCard {
+  id: string;
+  projectTitle: string;
+  roleTargeted: string | null;
+  grade: string;
+  compositeScore: number;
+  safetyScore: number;
+  verdict: string;
+  hireSignal: string;
+  skillsMatched: string[];
+  issuedAt: Timestamp | null;
+  workerName: string;
+}
+
+const GRADE_COLOURS: Record<string, string> = {
+  A: "text-green-400 border-green-700/50 bg-green-900/20",
+  B: "text-teal-400 border-teal-700/50 bg-teal-900/20",
+  C: "text-amber-400 border-amber-700/50 bg-amber-900/20",
+  D: "text-orange-400 border-orange-700/50 bg-orange-900/20",
+  F: "text-red-400 border-red-700/50 bg-red-900/20",
 };
 
-const hireStyles: Record<string, string> = {
-  "Strong Hire": "text-emerald-600 bg-emerald-50 border-emerald-100",
-  "Hire": "text-teal-600 bg-teal-50 border-teal-100",
-  "Needs Development": "text-amber-600 bg-amber-50 border-amber-100",
-  "Not Recommended": "text-red-600 bg-red-50 border-red-100",
+const HIRE_SIGNAL_STYLES: Record<string, string> = {
+  "Strong Hire": "text-green-400 border-green-700/50 bg-green-900/20",
+  "Hire": "text-teal-400 border-teal-700/50 bg-teal-900/20",
+  "Needs Development": "text-amber-400 border-amber-700/50 bg-amber-900/20",
+  "Not Recommended": "text-red-400 border-red-700/50 bg-red-900/20",
 };
 
-export default function PublicProfilePage({
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ workerId: string }>;
+}): Promise<Metadata> {
+  const { workerId } = await params;
+  try {
+    const q = query(
+      collection(db, "certificates"),
+      where("workerId", "==", workerId),
+      orderBy("issuedAt", "desc")
+    );
+    const snap = await getDocs(q);
+    const name = snap.docs[0]?.data()?.workerName ?? "Candidate";
+    return { title: `${name} — VeriPro Portfolio` };
+  } catch {
+    return { title: "VeriPro Portfolio" };
+  }
+}
+
+export default async function ProfilePage({
   params,
 }: {
   params: Promise<{ workerId: string }>;
 }) {
-  const { workerId } = use(params);
-  const [data, setData] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [copied, setCopied] = useState(false);
+  const { workerId } = await params;
+  let certs: CertCard[] = [];
+  let workerName = "";
 
-  useEffect(() => {
-    const fetchProfile = async () => {
-      try {
-        const res = await fetch(`/api/profile/${workerId}`);
-        if (res.ok) {
-          setData(await res.json());
-        }
-      } catch (err) {
-        console.error("Fetch profile failed", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchProfile();
-  }, [workerId]);
-
-  const handleCopy = () => {
-    navigator.clipboard.writeText(window.location.href);
-    setCopied(true);
-    toast.success("Profile link copied to clipboard");
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-[#FDFDFF] flex flex-col items-center justify-center p-4">
-        <Loader2 className="size-12 animate-spin text-teal-500 mb-4" />
-        <p className="text-gray-500 font-bold animate-pulse">Retrieving forensic records...</p>
-      </div>
+  try {
+    const q = query(
+      collection(db, "certificates"),
+      where("workerId", "==", workerId),
+      orderBy("issuedAt", "desc")
     );
+    const snap = await getDocs(q);
+    certs = snap.docs.map((d) => {
+      const data = d.data();
+      return {
+        id: d.id,
+        projectTitle: data.projectTitle,
+        roleTargeted: data.roleTargeted ?? null,
+        grade: data.grade ?? "?",
+        compositeScore: data.compositeScore ?? 0,
+        safetyScore: data.safetyScore ?? 0,
+        verdict: data.verdict ?? "",
+        hireSignal: data.hireSignal ?? "",
+        skillsMatched: data.skillsMatched ?? [],
+        issuedAt: data.issuedAt ?? null,
+        workerName: data.workerName ?? "",
+      };
+    });
+    workerName = certs[0]?.workerName ?? "Candidate";
+  } catch (e) {
+    console.error("Profile page error:", e);
   }
 
-  if (!data || !data.certificates || data.certificates.length === 0) {
+  const memberSince =
+    certs.length > 0 && certs[certs.length - 1].issuedAt
+      ? (certs[certs.length - 1].issuedAt as Timestamp).toDate().toLocaleDateString("en-GB", {
+          month: "long",
+          year: "numeric",
+        })
+      : null;
+
+  if (certs.length === 0) {
     return (
-      <div className="min-h-screen bg-[#FDFDFF] flex flex-col items-center justify-center p-4">
-        <BrandMark className="mb-12" />
-        <div className="max-w-md w-full bg-white/40 backdrop-blur-md border border-gray-100 p-12 rounded-[3rem] text-center shadow-xl">
-            <User className="size-16 mx-auto mb-6 text-gray-200" />
-            <h1 className="text-2xl font-bold mb-3 text-gray-950">Profile Not Found</h1>
-            <p className="text-gray-500 mb-8 font-medium leading-relaxed">This worker ID does not have any verified certificates yet.</p>
-            <Link href="/">
-              <Button variant="outline" className="h-12 rounded-xl px-8 border-gray-200 hover:bg-gray-50">Back to Network Home</Button>
+      <div className="min-h-screen bg-gray-950 text-gray-100">
+        <nav className="border-b border-white/5 px-6 py-4 flex items-center justify-between">
+          <Link href="/" className="font-bold text-lg tracking-tight hover:opacity-80 transition-opacity">VeriPro</Link>
+          <div className="flex gap-4 text-sm text-gray-400">
+            <Link href="/intake" className="hover:text-white transition-colors">Get Verified</Link>
+          </div>
+        </nav>
+        <div className="flex items-center justify-center flex-col gap-6 text-center px-4 py-32">
+          <div className="p-4 rounded-2xl bg-white/5 border border-white/10">
+            <Award className="w-12 h-12 text-gray-700" />
+          </div>
+          <div className="max-w-xs">
+            <h2 className="text-xl font-bold mb-2">No certificates yet</h2>
+            <p className="text-gray-500 text-sm mb-6">Complete your first practical assessment to showcase your verified skills here.</p>
+            <Link 
+              href="/intake" 
+              className="inline-flex items-center gap-2 bg-teal-500 hover:bg-teal-400 text-gray-950 font-semibold px-6 py-3 rounded-lg transition-colors w-full justify-center"
+            >
+              Start First Assessment
             </Link>
+          </div>
         </div>
       </div>
     );
   }
 
-  const { certificates, displayName, memberSince, count } = data;
-  const formattedDate = memberSince 
-    ? new Date(memberSince).toLocaleDateString('en-MY', { month: 'long', year: 'numeric' })
-    : "Recently joined";
+  const avgSafety = Math.round(certs.reduce((acc, c) => acc + c.safetyScore, 0) / certs.length);
+  const topGrade = certs.map(c => c.grade).sort()[0] || "N/A";
 
   return (
-    <div className="min-h-screen bg-[#FDFDFF] text-gray-900 font-sans selection:bg-teal-500/30 overflow-x-hidden relative flex flex-col">
-      {/* Grain Overlay */}
-      <div className="fixed inset-0 pointer-events-none z-[1] opacity-[0.03] contrast-150 brightness-100" style={{ backgroundImage: 'url("https://grainy-gradients.vercel.app/noise.svg")' }} />
-
-      {/* Technical Grid Overlay */}
-      <div className="fixed inset-0 pointer-events-none z-[0] opacity-[0.03] animate-[grid-scroll_60s_linear_infinite]" 
-           style={{ backgroundImage: 'radial-gradient(circle, #000 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
-
-      {/* Mesh Gradient Background */}
-      <div className="fixed inset-0 pointer-events-none overflow-hidden">
-        <div className="absolute top-[-10%] right-[-10%] w-[70%] h-[70%] bg-purple-200/20 rounded-full blur-[140px] animate-[drift_20s_infinite_linear]" />
-        <div className="absolute bottom-[-15%] left-[-5%] w-[60%] h-[60%] bg-teal-100/20 rounded-full blur-[120px] animate-[drift_25s_infinite_linear_reverse]" />
-      </div>
-
-      <style jsx global>{`
-        @keyframes grid-scroll {
-          from { background-position: 0 0; }
-          to { background-position: 400px 400px; }
-        }
-        @keyframes drift {
-          0% { transform: translate(0, 0) rotate(0deg) scale(1); }
-          33% { transform: translate(5%, 10%) rotate(120deg) scale(1.1); }
-          66% { transform: translate(-5%, 5%) rotate(240deg) scale(0.9); }
-          100% { transform: translate(0, 0) rotate(360deg) scale(1); }
-        }
-      `}</style>
-
-      <header className="relative z-50 border-b border-gray-200/50 bg-white/60 backdrop-blur-md">
-        <div className="max-w-5xl mx-auto px-6 h-20 flex items-center justify-between">
-          <Link href="/">
-            <BrandMark />
-          </Link>
-          <Link href="/" className="text-sm font-bold text-gray-500 hover:text-gray-900 flex items-center gap-2 transition-colors">
-            <ChevronLeft className="w-4 h-4" />
-            Network Home
-          </Link>
+    <div className="min-h-screen bg-gray-950 text-gray-100">
+      {/* Nav */}
+      <nav className="border-b border-white/5 px-6 py-4 flex items-center justify-between sticky top-0 bg-gray-950/80 backdrop-blur-md z-50">
+        <Link href="/" className="font-bold text-lg tracking-tight hover:opacity-80 transition-opacity">VeriPro</Link>
+        <div className="flex gap-4 text-sm text-gray-400">
+          <Link href="/intake" className="hover:text-white transition-colors">Get Verified</Link>
         </div>
-      </header>
+      </nav>
 
-      <main className="relative z-10 flex-1 max-w-5xl mx-auto px-6 py-16 w-full">
-        {/* Profile Header */}
-        <div className="mb-16 flex flex-col md:flex-row md:items-end justify-between gap-12 bg-white/40 backdrop-blur-md border border-white/60 p-10 md:p-14 rounded-[4rem] shadow-2xl relative overflow-hidden">
-          <div className="absolute top-0 right-0 size-64 bg-teal-500/5 blur-3xl -translate-y-1/2 translate-x-1/2" />
+      <div className="max-w-5xl mx-auto px-4 py-12">
+        {/* Header with Background Glow */}
+        <div className="relative mb-16">
+          <div className="absolute -top-24 -left-24 w-64 h-64 bg-teal-500/10 rounded-full blur-[100px] pointer-events-none" />
+          <div className="absolute top-0 right-0 w-96 h-96 bg-purple-500/5 rounded-full blur-[120px] pointer-events-none" />
           
-          <div className="relative z-10 space-y-8">
-            <div className="flex flex-col md:flex-row items-center gap-8">
-              <div className="size-28 md:size-32 rounded-[3rem] bg-gradient-to-br from-teal-500 to-purple-600 p-0.5 shadow-xl shadow-teal-500/20">
-                <div className="size-full bg-white rounded-[2.9rem] flex items-center justify-center">
-                  <User className="size-14 text-gray-950" />
-                </div>
+          <div className="flex flex-col md:flex-row md:items-end justify-between gap-8 relative">
+            <div>
+              <div className="inline-flex items-center gap-2 px-2 py-1 rounded-md bg-teal-900/30 border border-teal-700/30 text-teal-400 text-[10px] font-bold uppercase tracking-wider mb-4">
+                Verified Portfolio
               </div>
-              <div className="space-y-3 text-center md:text-left">
-                <h1 className="text-4xl md:text-6xl font-black tracking-tight text-gray-950 leading-tight">{displayName}</h1>
-                <div className="flex flex-wrap items-center justify-center md:justify-start gap-6 text-sm font-bold uppercase tracking-widest text-gray-400">
-                  <div className="flex items-center gap-2 px-4 py-1.5 rounded-full bg-teal-50 text-teal-600 border border-teal-100">
-                    <ShieldCheck className="size-4" />
-                    <span>{count} Verified Sessions</span>
+              <h1 className="text-5xl font-bold tracking-tight mb-4">{workerName}</h1>
+              <div className="flex flex-wrap items-center gap-6 text-sm text-gray-400">
+                {memberSince && (
+                  <span className="flex items-center gap-2">
+                    <Calendar className="w-4 h-4 text-gray-500" />
+                    Member since {memberSince}
+                  </span>
+                )}
+                <span className="flex items-center gap-2">
+                  <Shield className="w-4 h-4 text-teal-500/50" />
+                  SHA-256 Tamper-evident
+                </span>
+              </div>
+            </div>
+            <CopyLinkButton workerId={workerId} />
+          </div>
+
+          {/* Stats Summary */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-10">
+            <div className="p-4 rounded-xl border border-white/5 bg-white/[0.02]">
+              <div className="text-[10px] text-gray-500 uppercase tracking-widest mb-1">Total Certs</div>
+              <div className="text-2xl font-bold">{certs.length}</div>
+            </div>
+            <div className="p-4 rounded-xl border border-white/5 bg-white/[0.02]">
+              <div className="text-[10px] text-gray-500 uppercase tracking-widest mb-1">Top Grade</div>
+              <div className="text-2xl font-bold text-teal-400">{topGrade}</div>
+            </div>
+            <div className="p-4 rounded-xl border border-white/5 bg-white/[0.02]">
+              <div className="text-[10px] text-gray-500 uppercase tracking-widest mb-1">Avg Safety</div>
+              <div className="text-2xl font-bold text-green-400">{avgSafety}%</div>
+            </div>
+            <div className="p-4 rounded-xl border border-white/5 bg-white/[0.02]">
+              <div className="text-[10px] text-gray-500 uppercase tracking-widest mb-1">Verification</div>
+              <div className="text-sm font-bold text-gray-300 mt-2">100% Biometric</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Cert cards */}
+        <div className="space-y-6">
+          <h2 className="text-lg font-semibold mb-4 text-gray-400 px-1">Verification History</h2>
+          {certs.map((cert) => (
+            <div
+              key={cert.id}
+              className="group p-8 rounded-2xl border border-white/10 bg-white/[0.01] hover:border-teal-500/30 hover:bg-white/[0.02] transition-all duration-300"
+            >
+              <div className="flex flex-col gap-8">
+                <div className="flex flex-col md:flex-row items-start justify-between gap-6">
+                  <div className="flex-1">
+                    {cert.roleTargeted && (
+                      <div className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2">{cert.roleTargeted}</div>
+                    )}
+                    <h2 className="text-2xl font-bold leading-tight group-hover:text-teal-400 transition-colors">{cert.projectTitle}</h2>
+                    <div className="flex flex-wrap items-center gap-4 mt-4 text-sm text-gray-400">
+                      <span
+                        className={`text-xs font-bold px-3 py-1 rounded-full border ${
+                          HIRE_SIGNAL_STYLES[cert.hireSignal] ?? "text-gray-400 border-white/10 bg-white/5"
+                        }`}
+                      >
+                        {cert.hireSignal || "Assessed"}
+                      </span>
+                      <span className="flex items-center gap-2">
+                        <Shield className="w-4 h-4 text-gray-600" />
+                        Safety {cert.safetyScore}/100
+                      </span>
+                      {cert.issuedAt && (
+                        <span className="text-gray-600">
+                          {(cert.issuedAt as Timestamp).toDate().toLocaleDateString("en-GB", {
+                            day: "numeric",
+                            month: "short",
+                            year: "numeric",
+                          })}
+                        </span>
+                      )}
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Calendar className="size-4" />
-                    <span>Active since {formattedDate}</span>
+                  
+                  <div className="flex items-center gap-6 self-stretch md:self-auto">
+                    <div className="h-16 w-[1px] bg-white/5 hidden md:block" />
+                    <div className="flex flex-col items-center">
+                      <div
+                        className={`text-4xl font-black w-20 h-20 rounded-2xl border-2 flex items-center justify-center shadow-lg transition-transform group-hover:scale-105 ${
+                          GRADE_COLOURS[cert.grade] ?? "text-gray-400 border-white/10"
+                        }`}
+                      >
+                        {cert.grade}
+                      </div>
+                      <div className="text-[10px] text-gray-600 uppercase tracking-widest mt-2 font-bold">Grade</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-6 pt-6 border-t border-white/5">
+                  <div className="flex flex-wrap gap-2">
+                    {cert.skillsMatched.slice(0, 4).map(s => (
+                      <span key={s} className="text-[10px] px-2 py-1 rounded bg-white/5 border border-white/5 text-gray-400">
+                        {s}
+                      </span>
+                    ))}
+                    {cert.skillsMatched.length > 4 && (
+                      <span className="text-[10px] px-2 py-1 text-gray-600">+{cert.skillsMatched.length - 4} more</span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-3 ml-auto">
+                     {/* UX Enhancement: Failure State Actions */}
+                    {(cert.grade === "D" || cert.grade === "F" || cert.hireSignal === "Not Recommended" || cert.hireSignal === "Needs Development") ? (
+                      <div className="flex items-center gap-2">
+                        <Link
+                          href="/intake"
+                          className="text-xs bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg px-4 py-2 transition-colors font-semibold text-white"
+                        >
+                          Retake
+                        </Link>
+                        <Link
+                          href={`/certificate/${cert.id}#mentoring`}
+                          className="text-xs bg-teal-500 text-gray-950 hover:bg-teal-400 rounded-lg px-4 py-2 transition-colors font-bold"
+                        >
+                          Improve Score
+                        </Link>
+                      </div>
+                    ) : (
+                      <Link
+                        href={`/certificate/${cert.id}`}
+                        className="flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg px-6 py-2 transition-colors text-sm font-semibold"
+                      >
+                        <ExternalLink className="w-4 h-4 text-teal-400" />
+                        View Full Certificate
+                      </Link>
+                    )}
                   </div>
                 </div>
               </div>
             </div>
-          </div>
-
-          <Button 
-            variant="outline" 
-            className="relative z-10 h-14 rounded-2xl px-8 border-gray-200 bg-white hover:bg-gray-50 font-bold shadow-sm"
-            onClick={handleCopy} 
-          >
-            {copied ? <CheckCircle2 className="size-5 mr-3 text-emerald-500" /> : <Copy className="size-5 mr-3" />}
-            {copied ? "Profile Copied" : "Copy Profile URL"}
-          </Button>
+          ))}
         </div>
-
-        {/* Certificate Grid */}
-        <div className="space-y-12">
-          <div className="flex items-center justify-between px-4">
-            <h2 className="text-xs font-black uppercase tracking-[0.4em] text-gray-400">Verified Credentials</h2>
-            <div className="h-px flex-1 mx-12 bg-gray-200" />
-          </div>
-
-          <div className="grid gap-10">
-            {certificates.map((cert: any) => (
-              <Link key={cert.id} href={`/certificate/${cert.id}`}>
-                <div className="group relative overflow-hidden bg-white/40 backdrop-blur-md border border-white/60 hover:border-teal-500/30 p-10 rounded-[3rem] transition-all duration-500 hover:shadow-2xl hover:-translate-y-2">
-                  <div className="flex flex-col md:flex-row justify-between gap-12">
-                    <div className="space-y-8 flex-1">
-                      <div>
-                        <div className="flex items-center gap-3 mb-4">
-                           <div className="px-4 py-1.5 rounded-full bg-gray-950 text-white text-[10px] font-black uppercase tracking-[0.2em]">
-                             {cert.trade.replace(/_/g, " ")}
-                           </div>
-                           <div className="size-1.5 bg-gray-200 rounded-full" />
-                           <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
-                             {new Date(cert.issuedAt?.seconds * 1000 || cert.issuedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
-                           </span>
-                        </div>
-                        <h2 className="text-3xl font-bold text-gray-950 group-hover:text-teal-600 transition-colors leading-tight">
-                          {cert.projectTitle}
-                        </h2>
-                        <p className="text-gray-500 mt-3 text-lg font-medium">Target Role: {cert.roleTargeted || "Technical Specialist"}</p>
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-4">
-                        <div className={`px-6 py-2.5 rounded-2xl border text-sm font-black uppercase tracking-widest shadow-sm ${gradeStyles[cert.grade] || gradeStyles.C}`}>
-                          Grade {cert.grade}
-                        </div>
-                        {cert.hireSignal && (
-                          <div className={`px-6 py-2.5 rounded-2xl border text-sm font-black uppercase tracking-widest shadow-sm ${hireStyles[cert.hireSignal] || ""}`}>
-                            {cert.hireSignal}
-                          </div>
-                        )}
-                        <div className="flex items-center gap-3 px-6 py-2.5 rounded-2xl bg-gray-50 border border-gray-100 text-xs font-bold text-gray-600 shadow-sm">
-                          <Activity className="size-4 text-orange-500" />
-                          Safety {cert.safetyScore}%
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-row md:flex-col items-center md:items-end justify-between md:justify-center gap-4 shrink-0">
-                      <div className="size-16 rounded-3xl bg-gray-50 border border-gray-100 flex items-center justify-center group-hover:bg-teal-500 group-hover:border-teal-500 transition-all duration-500 shadow-sm group-hover:shadow-teal-500/20">
-                        <ChevronRight className="size-8 text-gray-300 group-hover:text-white transition-all duration-500 group-hover:translate-x-1" />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </Link>
-            ))}
-          </div>
-        </div>
-      </main>
-
-      <footer className="relative z-10 border-t border-gray-100 py-16 bg-white/40">
-        <div className="max-w-5xl mx-auto px-6 flex flex-col md:flex-row justify-between items-center gap-8">
-          <div className="flex items-center gap-3 text-gray-400 font-bold text-xs uppercase tracking-widest">
-            <ShieldCheck className="size-5 text-teal-500" />
-            <span>VeriPro Biometric Identity Network</span>
-          </div>
-          <p className="text-gray-300 font-bold text-[9px] uppercase tracking-[0.4em]">
-            Trust through forensic validation • v4.2.0
-          </p>
-        </div>
-      </footer>
+      </div>
     </div>
   );
 }
+

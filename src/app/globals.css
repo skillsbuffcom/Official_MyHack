@@ -39,6 +39,10 @@
   --radius-3xl: calc(var(--radius) * 1.8);
   --radius-4xl: calc(var(--radius) * 2.2);
 
+  @keyframes border-spin {
+    from { --border-angle: 0deg; }
+    to   { --border-angle: 360deg; }
+  }
   @keyframes fade-up {
     from { opacity: 0; transform: translateY(8px); }
     to { opacity: 1; transform: translateY(0); }
@@ -130,6 +134,61 @@
   .fade-up {
     animation: fade-up 220ms ease-out both;
   }
+  @property --border-angle {
+    syntax: "<angle>";
+    inherits: false;
+    initial-value: 0deg;
+  }
+
+  .glow-border {
+    position: relative;
+    background: rgba(255,255,255,0.02);
+    border: none;
+    border-radius: 0.75rem;
+    --border-angle: 0deg;
+    animation: border-spin 4s linear infinite;
+  }
+
+  .glow-border::before {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    padding: 1px;
+    background: conic-gradient(
+      from var(--border-angle),
+      transparent 70%,
+      #2dd4bf 80%,
+      #5eead4 85%,
+      #ffffff 88%,
+      #5eead4 90%,
+      #2dd4bf 92%,
+      transparent 100%
+    );
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+
+  .glow-border::after {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    background: conic-gradient(
+      from var(--border-angle),
+      transparent 70%,
+      #2dd4bf55 80%,
+      #2dd4bfaa 88%,
+      #2dd4bf55 92%,
+      transparent 100%
+    );
+    filter: blur(6px);
+    pointer-events: none;
+    z-index: -1;
+  }
+
   .face-scan-ring {
     animation: face-scan-ring 3.6s linear forwards;
   }
