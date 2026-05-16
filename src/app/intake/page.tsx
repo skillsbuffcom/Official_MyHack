@@ -2,7 +2,6 @@
 import { useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Upload, FileImage, Loader2, AlertCircle, ChevronLeft, Zap } from "lucide-react";
-import { toast } from "sonner";
 import Link from "next/link";
 import { BrandMark } from "@/components/brand-mark";
 import { ThemeToggle } from "@/components/theme-toggle";

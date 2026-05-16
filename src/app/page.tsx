@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Shield, Zap, Award, Upload, ChevronRight, Lock, FileCheck, Fingerprint, Loader2 } from "lucide-react";
+import { Shield, Zap, Award, Upload, ChevronRight, Loader2 } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { BrandMark } from "@/components/brand-mark";
 import { BiometricIllustration, AIIllustration, HashIllustration, EmployerReadIllustration } from "@/components/feature-illustrations";

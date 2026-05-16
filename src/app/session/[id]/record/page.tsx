@@ -408,8 +408,8 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
         const o = data.observed as Record<string, unknown>;
         const f: string[] = (data.flags as string[]) ?? [];
         const isMatch = data.result === "MATCH";
-        const mResults: any[] = (o.markerResults as any[]) ?? [];
-        const markerDecisions: any[] = (o.markerDecisions as any[]) ?? [];
+        const mResults = (o.markerResults as { confirmed?: boolean; area_visible?: boolean; type?: string; location?: string }[]) ?? [];
+        const markerDecisions = (o.markerDecisions as { status?: string; type?: string; location?: string }[]) ?? [];
         const rawMarkerRows = markerDecisions.length > 0 ? markerDecisions : mResults.map(m => ({
           status: m.confirmed ? "confirmed" : m.area_visible ? "missing" : "uncertain",
           type: m.type,
@@ -544,20 +544,15 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
 
   const initHands = useCallback(() => {
     if (typeof window === "undefined" || !(window as unknown as Record<string, unknown>).Hands || handsRef.current) return;
-    const HandsClass = (window as unknown as Record<string, unknown>).Hands as new (opts: unknown) => {
-      setOptions(o: unknown): void;
-      onResults(cb: (results: { multiHandLandmarks?: HandLandmark[][] }) => void): void;
-      send(data: unknown): Promise<void>;
-    };
+    const HandsClass = (window as unknown as Record<string, unknown>).Hands as new (opts: unknown) => Hands;
     const hands = new HandsClass({
       locateFile: (file: string) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
     });
     hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
 
     hands.onResults((results) => {
-      const landmarkSets = Array.isArray(results.multiHandLandmarks) ? results.multiHandLandmarks : [];
+      const landmarkSets = Array.isArray(results.multiHandLandmarks) ? (results.multiHandLandmarks as HandLandmark[][]) : [];
       const handCount = landmarkSets.length;
-      const hasBothHands = handCount === 2;
       const hasBothBackhands = hasTwoBackhands(landmarkSets);
 
       if (handCount > 0) {
@@ -619,7 +614,7 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
 
     handsRef.current = hands;
     setIsMediaPipeLoaded(true);
-  }, [flagHandsLeftFrame, verifyLockedHandPresence]);
+  }, [flagHandsLeftFrame, verifyLockedHandPresence, resetGestureCountdown]);
 
   useEffect(() => {
     const checkInterval = setInterval(() => {

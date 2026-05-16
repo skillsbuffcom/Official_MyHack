@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback, Fragment } from "react";
-import { useRouter, useParams, useSearchParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Script from "next/script";
 import { 
@@ -15,8 +15,7 @@ import {
   Activity, 
   ShieldCheck, 
   Volume2, 
-  VolumeX, 
-  Zap 
+  VolumeX 
 } from "lucide-react";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
@@ -52,6 +51,19 @@ const stepCopy: Record<string, { title: string; body: string }> = {
   },
 };
 
+interface HandLandmark { x: number; y: number; z: number; visibility?: number; }
+interface Hands {
+  setOptions(o: {
+    maxNumHands?: number;
+    modelComplexity?: number;
+    minDetectionConfidence?: number;
+    minTrackingConfidence?: number;
+    selfieMode?: boolean;
+  }): void;
+  onResults(cb: (results: { multiHandLandmarks?: HandLandmark[][] }) => void): void;
+  send(data: { image: HTMLVideoElement }): Promise<void>;
+}
+
 export default function IdentityVerificationPage() {
   const { id } = useParams();
   const searchParams = useSearchParams();
@@ -64,7 +76,7 @@ export default function IdentityVerificationPage() {
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const handsRef = useRef<any>(null);
+  const handsRef = useRef<Hands | null>(null);
   const stepRef = useRef(step);
   useEffect(() => { stepRef.current = step; }, [step]);
 
@@ -93,9 +105,7 @@ export default function IdentityVerificationPage() {
   const docLine2GlowRef = useRef<SVGLineElement | null>(null);
   const docLine3Ref = useRef<SVGLineElement | null>(null);
   const docLine3GlowRef = useRef<SVGLineElement | null>(null);
-
   const handsReadyRef = useRef(false);
-  const [prepCountdown, setPrepCountdown] = useState(5);
   const [isMediaPipeLoaded, setIsMediaPipeLoaded] = useState(false);
 
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -481,13 +491,7 @@ export default function IdentityVerificationPage() {
   }, [capturedSnapshot, playShutter, addLog]);
 
   const initHands = useCallback(() => {
-    const win = window as unknown as { 
-      Hands: new (config: { locateFile: (file: string) => string }) => {
-        setOptions: (options: Record<string, unknown>) => void;
-        onResults: (cb: (results: { multiHandLandmarks?: unknown[] }) => void) => void;
-        send: (input: { image: HTMLVideoElement }) => Promise<void>;
-      } 
-    };
+    const win = window as unknown as { Hands: new (config: { locateFile: (file: string) => string }) => Hands };
     if (typeof window === "undefined" || !win.Hands || handsRef.current) return;
     
     console.log("INITIALISING MEDIAPIPE HANDS...");
@@ -503,7 +507,7 @@ export default function IdentityVerificationPage() {
       minTrackingConfidence: 0.6
     });
 
-    hands.onResults((results: { multiHandLandmarks?: unknown[] }) => {
+    hands.onResults((results: { multiHandLandmarks?: HandLandmark[][] }) => {
       // Use ref to check step to avoid capturing stale 'step'
       if (stepRef.current !== "hands" || capturedSnapshot) return;
 
@@ -816,11 +820,6 @@ export default function IdentityVerificationPage() {
                     <path d="M4.2,6.45 V7.0 H4.75" />
                     <path d="M11.8,6.45 V7.0 H11.25" />
                   </g>
-<<<<<<< HEAD
-                  <g clipPath="url(#doc-rect-clip)">
-                    <line x1="4.2" y1="2.0" x2="11.8" y2="2.0" stroke="rgba(45,212,191,0.7)" strokeWidth="0.06" className="face-scan-sweep" />
-=======
-
                   {/* 3 scan lines — rAF driven, ping-pong up/down at staggered phases */}
                   <g clipPath="url(#doc-rect-clip)">
                     <line ref={docLine1GlowRef} x1="4.2" y1="2.0" x2="11.8" y2="2.0" stroke="#2dd4bf" strokeWidth="0.22" opacity="0.18" />
@@ -829,7 +828,6 @@ export default function IdentityVerificationPage() {
                     <line ref={docLine2Ref}     x1="4.2" y1="2.0" x2="11.8" y2="2.0" stroke="#2dd4bf" strokeWidth="0.045" opacity="0.7" />
                     <line ref={docLine3GlowRef} x1="4.2" y1="2.0" x2="11.8" y2="2.0" stroke="#2dd4bf" strokeWidth="0.22" opacity="0.08" />
                     <line ref={docLine3Ref}     x1="4.2" y1="2.0" x2="11.8" y2="2.0" stroke="#2dd4bf" strokeWidth="0.045" opacity="0.45" />
->>>>>>> 1eac018 (feat: complete modern UI overhaul for certificate, verification, and intake flows)
                   </g>
                 </svg>
                 <div className="absolute bottom-5 inset-x-0 flex justify-center pointer-events-none">
@@ -873,13 +871,6 @@ export default function IdentityVerificationPage() {
                       {faceCountdown}
                     </text>
                   )}
-<<<<<<< HEAD
-                  {faceState === "scanning" && (
-                    <g clipPath="url(#face-oval-clip)">
-                      <line x1="5.5" y1="1.65" x2="10.5" y2="1.65" stroke="rgba(255,255,255,0.55)" strokeWidth="0.05" className="face-scan-sweep" />
-                      <text x="8" y="5.1" textAnchor="middle" fill="white" fontSize="1.6" fontWeight="700" fontFamily="system-ui" opacity="0.9">
-=======
-
                   {/* 3D face contour scan — H latitude arc + V meridian arc, meet at centre */}
                   {faceState === "scanning" && (
                     <g clipPath="url(#face-oval-clip)">
@@ -892,7 +883,6 @@ export default function IdentityVerificationPage() {
                       {/* Countdown */}
                       <text x="8" y="5.1" textAnchor="middle" fill="white"
                         fontSize="1.6" fontWeight="700" fontFamily="system-ui" opacity="0.9">
->>>>>>> 1eac018 (feat: complete modern UI overhaul for certificate, verification, and intake flows)
                         {scanCountdown}
                       </text>
                     </g>
@@ -977,7 +967,7 @@ export default function IdentityVerificationPage() {
             {step !== "complete" && (
               <div className="absolute bottom-4 left-4">
                 <div className="rounded-full bg-black/55 px-3 py-1.5 text-[11px] font-medium text-white/80 backdrop-blur-sm">
-                  Step " + (currentStepIndex + 1) + " of " + steps.length + " | " + steps[currentStepIndex]?.label
+                  { "Step " + (currentStepIndex + 1) + " of " + steps.length + " | " + (steps[currentStepIndex]?.label || "") }
                 </div>
               </div>
             )}
@@ -1143,7 +1133,7 @@ export default function IdentityVerificationPage() {
                 Live Pipeline Log
               </div>
               <div className="space-y-2 font-mono text-[11px]">
-                {logs.map((log, i) => (
+                {logs.map((log: { time: string; msg: string }, i: number) => (
                   <div key={i} className="flex gap-3 leading-relaxed animate-in fade-in slide-in-from-left-2 duration-300">
                     <span className="shrink-0 text-foreground/70 dark:text-foreground/60">{log.time}</span>
                     <span className={i === logs.length - 1 ? "text-primary font-medium" : "text-foreground/80 dark:text-muted-foreground"}>{log.msg}</span>
