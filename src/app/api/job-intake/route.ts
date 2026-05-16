@@ -71,7 +71,22 @@ export async function POST(req: NextRequest) {
     const base64 = Buffer.from(bytes).toString("base64");
     const mimeType = file.type as "image/png" | "image/jpeg" | "application/pdf";
 
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    const model = genAI.getGenerativeModel({ 
+      model: "gemini-2.5-flash",
+      generationConfig: { 
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: "object",
+          properties: {
+            role_title: { type: "string" },
+            required_skills: { type: "array", items: { type: "string" } },
+            preferred_skills: { type: "array", items: { type: "string" } },
+            raw_description: { type: "string" }
+          },
+          required: ["role_title", "required_skills", "raw_description"]
+        }
+      }
+    });
 
     // Call 1: skill extraction
     const extractResult = await model.generateContent([
@@ -80,21 +95,46 @@ export async function POST(req: NextRequest) {
     ]);
     const extracted = parseJSON(extractResult.response.text());
 
-    if (extracted.error || !extracted.role_title) {
+    if (!extracted.role_title) {
       return NextResponse.json(
-        { error: extracted.error || "Failed to extract structured data from job posting" },
+        { error: "Failed to extract structured data from job posting" },
         { status: 422 }
       );
     }
 
     // Call 2: project brief
-    const briefResult = await model.generateContent(
+    const briefModel = genAI.getGenerativeModel({
+      model: "gemini-2.5-flash",
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: "object",
+          properties: {
+            project_title: { type: "string" },
+            task_description: { type: "string" },
+            materials_needed: { type: "array", items: { type: "string" } },
+            expected_duration_minutes: { type: "number" },
+            skills_being_tested: { type: "array", items: { type: "string" } }
+          },
+          required: ["project_title", "task_description", "materials_needed", "expected_duration_minutes", "skills_being_tested"]
+        }
+      }
+    });
+
+    const briefResult = await briefModel.generateContent(
       buildBriefPrompt(
         extracted.role_title as string,
         extracted.required_skills as string[]
       )
     );
     const brief = parseJSON(briefResult.response.text());
+
+    if (!brief.project_title) {
+      return NextResponse.json(
+        { error: "Failed to generate assessment brief" },
+        { status: 422 }
+      );
+    }
 
     // Write to Firestore
     const docRef = await addDoc(collection(db, "jobPostings"), {

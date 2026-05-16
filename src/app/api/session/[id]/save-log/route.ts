@@ -15,7 +15,7 @@ export async function POST(
   try {
     const body = await req.json();
 
-    // Save all events but flag qualifying ones
+    // Map the incoming Robotics-ER entry to the session database
     const isQualifying =
       body.confidence >= CONFIDENCE_GATE &&
       !SKIP_ACTIONS.includes(body.action);

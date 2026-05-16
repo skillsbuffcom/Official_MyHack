@@ -1,208 +1,902 @@
 "use client";
-import { use, useRef, useState, useEffect, useCallback } from "react";
-import { useRouter } from "next/navigation";
-import { Camera, Loader2, CheckCircle, AlertCircle, Hand } from "lucide-react";
 
-const COUNTDOWN_SECONDS = 5;
+import { Fragment, use, useCallback, useEffect, useRef, useState } from "react";
+import Image from "next/image";
+import Link from "next/link";
+import {
+  Activity,
+  ArrowLeft,
+  Camera,
+  CheckCircle2,
+  Hand,
+  Loader2,
+  RotateCcw,
+  ShieldCheck,
+  Terminal,
+  Volume2,
+  VolumeX,
+} from "lucide-react";
+import { toast } from "sonner";
 
-function applyGreenChannel(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D) {
-  const id = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const d = id.data;
-  for (let i = 0; i < d.length; i += 4) {
-    d[i] = d[i + 1];     // R ← G
-    d[i + 2] = d[i + 1]; // B ← G
-    // Alpha unchanged
-  }
-  ctx.putImageData(id, 0, 0);
-}
+import { BrandMark } from "@/components/brand-mark";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 
-export default function VerifyPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
+type Step = "face" | "ic" | "workspace" | "hands" | "complete";
+
+const steps: { key: Exclude<Step, "complete">; label: string; short: string }[] = [
+  { key: "face",      label: "Identity capture",   short: "Face"      },
+  { key: "ic",        label: "Document capture",    short: "Document"  },
+  { key: "workspace", label: "Workspace capture",   short: "Workspace" },
+  { key: "hands",     label: "Hand registration",   short: "Hands"     },
+];
+
+const stepCopy: Record<Exclude<Step, "complete">, { title: string; body: string }> = {
+  face:      { title: "Identity capture",   body: "Position the worker's face clearly in frame. Keep the camera steady and ensure good lighting before capturing." },
+  ic:        { title: "Document capture",   body: "Hold the identity card flat and close to the camera. Avoid glare on the laminated surface." },
+  workspace: { title: "Workspace capture",  body: "Frame the full work area. This reference shot anchors all downstream evidence to the correct environment." },
+  hands:     { title: "Hand registration",  body: "Place both hands palm-down inside the frame and hold steady. A snapshot will be taken automatically." },
+};
+
+export default function IdentityVerificationPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const router = useRouter();
+  const [step, setStep] = useState<Step>("face");
+  const [isCapturing, setIsCapturing] = useState(false);
+  const [handsReady, setHandsReady] = useState(false);
+  const [prepCountdown, setPrepCountdown] = useState(5);
+  const [capturedSnapshot, setCapturedSnapshot] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
-  const [state, setState] = useState<
-    "INIT" | "CAMERA" | "COUNTDOWN" | "CAPTURING" | "REGISTERING" | "DONE" | "ERROR"
-  >("INIT");
-  const [countdown, setCountdown] = useState(COUNTDOWN_SECONDS);
-  const [error, setError] = useState("");
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [scanCountdown, setScanCountdown] = useState(3);
+  type FaceState = "searching" | "detected" | "countdown" | "scanning" | "captured";
+  const [faceState, setFaceStateInner] = useState<FaceState>("searching");
+  const faceStateRef = useRef<FaceState>("searching");
+  const [faceCountdown, setFaceCountdown] = useState(3);
+  const faceCountdownRef2 = useRef(3);
+  const detectedSinceRef = useRef<number | null>(null);
+  const isCapturingRef = useRef(false);
+  const setFaceState = useCallback((s: FaceState) => {
+    faceStateRef.current = s;
+    setFaceStateInner(s);
+  }, []);
+  const [logs, setLogs] = useState<{ time: string; msg: string }[]>([
+    { time: `${new Date().toISOString().split('T')[0]} ${new Date().toLocaleTimeString('en-GB', { hour12: false })}`, msg: "Verification pipeline active." },
+    { time: `${new Date().toISOString().split('T')[0]} ${new Date().toLocaleTimeString('en-GB', { hour12: false })}`, msg: "Awaiting first capture." },
+  ]);
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  const [currentDeviceIndex, setCurrentDeviceIndex] = useState(0);
+  const userPickedDeviceRef = useRef(false);
+  const [userPickedDevice, setUserPickedDevice] = useState(false);
 
-  const startCamera = useCallback(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 640, height: 480, facingMode: "user" },
-      });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-      }
-      setState("CAMERA");
-    } catch {
-      setError("Camera access denied. Please allow camera access and reload.");
-      setState("ERROR");
-    }
+
+  const [isMuted, setIsMuted] = useState(false);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+
+  const getAudioCtx = useCallback(() => {
+    if (!audioCtxRef.current) audioCtxRef.current = new AudioContext();
+    return audioCtxRef.current;
   }, []);
 
-  const capture = useCallback(async () => {
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    if (!video || !canvas) return;
-
-    setState("CAPTURING");
-
-    const ctx = canvas.getContext("2d")!;
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    ctx.drawImage(video, 0, 0);
-    applyGreenChannel(canvas, ctx);
-
-    const base64 = canvas.toDataURL("image/jpeg", 0.92).split(",")[1];
-
-    setState("REGISTERING");
+  const playTone = useCallback((startHz: number, endHz: number, durationMs: number, volume = 0.08) => {
+    if (isMuted) return;
     try {
+      const ctx = getAudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(startHz, ctx.currentTime);
+      osc.frequency.linearRampToValueAtTime(endHz, ctx.currentTime + durationMs / 1000);
+      gain.gain.setValueAtTime(0, ctx.currentTime);
+      gain.gain.linearRampToValueAtTime(volume, ctx.currentTime + 0.02);
+      gain.gain.setValueAtTime(volume, ctx.currentTime + durationMs / 1000 - 0.05);
+      gain.gain.linearRampToValueAtTime(0, ctx.currentTime + durationMs / 1000);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + durationMs / 1000);
+    } catch {}
+  }, [isMuted, getAudioCtx]);
+
+  const shutterAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    shutterAudioRef.current = new Audio("https://github.com/wesbos/JavaScript30/raw/master/19%20-%20Webcam%20Fun/snap.mp3");
+    shutterAudioRef.current.load();
+  }, []);
+
+  const playShutter = useCallback(() => {
+    if (isMuted || !shutterAudioRef.current) return;
+    shutterAudioRef.current.currentTime = 0;
+    shutterAudioRef.current.volume = 0.5;
+    shutterAudioRef.current.play().catch(() => {});
+  }, [isMuted]);
+
+  const addLog = useCallback((msg: string) => {
+    const now = new Date();
+    const date = now.toISOString().split('T')[0];
+    const time = now.toLocaleTimeString('en-GB', { 
+      hour12: false, 
+      hour: '2-digit', 
+      minute: '2-digit', 
+      second: '2-digit' 
+    });
+    setLogs((prev) => [...prev.slice(-4), { time: `${date} ${time}`, msg }]);
+  }, []);
+
+  const currentStepIndex = steps.findIndex(s => s.key === step);
+
+  useEffect(() => {
+    async function setupCamera() {
+      try {
+        if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+        
+        const initialDevices = await navigator.mediaDevices.enumerateDevices();
+        const initialVideo = initialDevices.filter(d => d.kind === "videoinput");
+        setDevices(initialVideo);
+
+        const picked = userPickedDeviceRef.current && initialVideo[currentDeviceIndex]?.deviceId;
+        const primaryConstraints: MediaStreamConstraints = {
+          video: step === "face" && !picked
+            ? { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } }
+            : picked
+              ? { deviceId: { exact: initialVideo[currentDeviceIndex].deviceId }, width: { ideal: 1920 }, height: { ideal: 1080 } }
+              : { facingMode: step === "face" ? "user" : "environment", width: { ideal: 1920 }, height: { ideal: 1080 } }
+        };
+
+        let stream: MediaStream;
+        try {
+          stream = await navigator.mediaDevices.getUserMedia(primaryConstraints);
+        } catch (primaryErr) {
+          console.warn("Primary camera constraints failed, trying fallback...", primaryErr);
+          // Fallback: just any video device
+          stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        }
+
+        streamRef.current = stream;
+        if (videoRef.current) videoRef.current.srcObject = stream;
+
+        const finalDevices = await navigator.mediaDevices.enumerateDevices();
+        setDevices(finalDevices.filter(d => d.kind === "videoinput"));
+      } catch (err) {
+        console.error("Camera access failed completely:", err);
+        toast.error("Camera access denied. Please check site permissions.");
+      }
+    }
+    setupCamera();
+    return () => { if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop()); };
+  }, [step, currentDeviceIndex]);
+
+  const handleRestart = () => {
+    setStep("face");
+    setCapturedSnapshot(null);
+    setHandsReady(false);
+    setPrepCountdown(5);
+    const time = `${new Date().toISOString().split('T')[0]} ${new Date().toLocaleTimeString('en-GB', { hour12: false })}`;
+    setLogs([
+      { time, msg: "Session restarted." },
+      { time, msg: "Awaiting first capture." }
+    ]);
+  };
+
+  const handleBack = () => {
+    if (step === "ic") setStep("face");
+    else if (step === "workspace") setStep("ic");
+    else if (step === "hands") setStep("workspace");
+    setCapturedSnapshot(null);
+    setHandsReady(false);
+    setPrepCountdown(5);
+    addLog("Returned to previous step.");
+  };
+
+  const doFaceCapture = useCallback(() => {
+    if (isCapturingRef.current) return;
+    isCapturingRef.current = true;
+    setIsCapturing(true);
+    setFaceState("scanning");
+    playTone(520, 880, 400);
+    setTimeout(() => {
+      setFaceState("captured");
+      playShutter();
+      setTimeout(() => {
+        isCapturingRef.current = false;
+        setIsCapturing(false);
+        setFaceState("searching");
+        setStep("ic");
+        addLog("Face reference captured.");
+      }, 900);
+    }, 4000);
+  }, [addLog, setFaceState, playShutter, playTone]);
+
+
+  // Countdown synced to the 3.6s ring animation
+  useEffect(() => {
+    if (faceState !== "scanning") return;
+    const t0 = setTimeout(() => setScanCountdown(3), 0);
+    const t1 = setTimeout(() => setScanCountdown(2), 1200);
+    const t2 = setTimeout(() => setScanCountdown(1), 2400);
+    return () => { clearTimeout(t0); clearTimeout(t1); clearTimeout(t2); };
+  }, [faceState]);
+
+  const handleCapture = () => {
+    setIsCapturing(true);
+    playShutter();
+    setTimeout(() => {
+      setIsCapturing(false);
+      if (step === "ic") { setStep("workspace"); addLog("Document captured."); }
+      else if (step === "workspace") { setStep("hands"); addLog("Workspace recorded. Waiting for hand registration."); }
+    }, 1000);
+  };
+
+  // Face detection loop
+  useEffect(() => {
+    if (step !== "face") return;
+    let active = true;
+    let cdTimer: ReturnType<typeof setInterval> | null = null;
+
+    const clearCountdown = () => {
+      if (cdTimer) { clearInterval(cdTimer); cdTimer = null; }
+      faceCountdownRef2.current = 3;
+      setFaceCountdown(3);
+    };
+
+    const startCountdown = () => {
+      if (cdTimer) return;
+      setFaceState("countdown");
+      faceCountdownRef2.current = 3;
+      setFaceCountdown(3);
+      cdTimer = setInterval(() => {
+        if (!active) return;
+        faceCountdownRef2.current -= 1;
+        setFaceCountdown(faceCountdownRef2.current);
+        if (faceCountdownRef2.current <= 0) {
+          clearInterval(cdTimer!); cdTimer = null;
+          if (active) doFaceCapture();
+        }
+      }, 1000);
+    };
+
+    const detect = async () => {
+      const st = faceStateRef.current;
+      if (!active || st === "scanning" || st === "captured") return;
+      const video = videoRef.current;
+      if (!video || video.readyState < 2) return;
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const FD = (window as any).FaceDetector;
+        if (!FD) { if (st !== "searching") setFaceState("searching"); return; }
+        const faces = await new FD({ fastMode: true, maxDetectedFaces: 1 }).detect(video);
+        if (!active) return;
+        const st2 = faceStateRef.current;
+        if (st2 === "scanning" || st2 === "captured") return;
+
+        if (faces.length > 0) {
+          const bb = faces[0].boundingBox;
+          const vw = video.videoWidth || 1280;
+          const vh = video.videoHeight || 720;
+          const cx = bb.x + bb.width / 2;
+          const cy = bb.y + bb.height / 2;
+          const inOval = cx > vw * 0.28 && cx < vw * 0.72 && cy > vh * 0.14 && cy < vh * 0.86;
+
+          if (inOval) {
+            if (st2 === "searching") {
+              setFaceState("detected");
+              detectedSinceRef.current = Date.now();
+              playTone(440, 520, 180);
+            } else if (st2 === "detected") {
+              if (detectedSinceRef.current && Date.now() - detectedSinceRef.current > 700) {
+                startCountdown();
+              }
+            }
+          } else {
+            detectedSinceRef.current = null;
+            clearCountdown();
+            if (st2 !== "searching") setFaceState("searching");
+          }
+        } else {
+          detectedSinceRef.current = null;
+          clearCountdown();
+          if (st2 !== "searching") setFaceState("searching");
+        }
+      } catch {
+        if (faceStateRef.current === "searching") return;
+        setFaceState("searching");
+      }
+    };
+
+    const interval = setInterval(detect, 250);
+    return () => { active = false; clearInterval(interval); clearCountdown(); };
+  }, [step, doFaceCapture, setFaceState, playTone]);
+
+  const doHandCapture = useCallback(() => {
+    if (!videoRef.current || capturedSnapshot) return;
+    const tempCanvas = document.createElement("canvas");
+    tempCanvas.width = videoRef.current.videoWidth || 1280;
+    tempCanvas.height = videoRef.current.videoHeight || 720;
+    const ctx = tempCanvas.getContext("2d");
+    if (ctx) {
+      ctx.drawImage(videoRef.current, 0, 0, tempCanvas.width, tempCanvas.height);
+      // Green-channel filter: enhances vein patterns, skin texture, and surface markers
+      const id = ctx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+      const d = id.data;
+      for (let i = 0; i < d.length; i += 4) { d[i] = d[i + 1]; d[i + 2] = d[i + 1]; }
+      ctx.putImageData(id, 0, 0);
+      setCapturedSnapshot(tempCanvas.toDataURL("image/jpeg", 0.92));
+      playShutter();
+      addLog("Hand snapshot captured for review.");
+    }
+  }, [capturedSnapshot, playShutter, addLog]);
+
+  // 5s countdown after user clicks Ready, then auto-capture
+  useEffect(() => {
+    if (!handsReady || capturedSnapshot) return;
+    let prep = 5;
+    setTimeout(() => setPrepCountdown(5), 0);
+    let active = true;
+    const timer = setInterval(() => {
+      if (!active) return;
+      prep -= 1;
+      setPrepCountdown(prep);
+      if (prep <= 0) {
+        clearInterval(timer);
+        if (active) doHandCapture();
+      }
+    }, 1000);
+    return () => { active = false; clearInterval(timer); };
+  }, [handsReady, capturedSnapshot, doHandCapture]);
+
+  const handleConfirm = async () => {
+    if (!capturedSnapshot || isAnalyzing) return;
+    setIsAnalyzing(true);
+    addLog("Analysing hand profile.");
+    try {
+      try {
+        localStorage.setItem(`hand_master_${id}`, capturedSnapshot);
+        localStorage.setItem("hand_master_latest", capturedSnapshot);
+      } catch (e) {
+        if (e instanceof DOMException && (e.name === "QuotaExceededError" || e.name === "NS_ERROR_DOM_QUOTA_REACHED")) {
+          Object.keys(localStorage).forEach(key => {
+            if (key.startsWith("hand_master_") || key.startsWith("hand_profile_")) localStorage.removeItem(key);
+          });
+          localStorage.setItem(`hand_master_${id}`, capturedSnapshot);
+          localStorage.setItem("hand_master_latest", capturedSnapshot);
+        } else {
+          throw e;
+        }
+      }
       const res = await fetch("/api/verify/analyze-master", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageBase64: base64, mimeType: "image/jpeg" }),
+        body: JSON.stringify({ imageBase64: capturedSnapshot.split(",")[1] }),
       });
-
-      if (!res.ok) throw new Error("Registration API failed");
-
-      const profile = await res.json();
-
-      // Store in localStorage (never persisted server-side)
-      localStorage.setItem(`hand_master_${id}`, base64);
-      localStorage.setItem(`hand_profile_${id}`, JSON.stringify(profile));
-
-      setState("DONE");
-
-      // Stop camera
-      streamRef.current?.getTracks().forEach((t) => t.stop());
-
-      setTimeout(() => {
-        router.push(`/session/${id}/setup`);
-      }, 1500);
-    } catch (err) {
-      console.error("Registration failed:", err);
-      setError("Registration failed. Please try again.");
-      setState("CAMERA");
+      const data = await res.json();
+      if (data) {
+        localStorage.setItem(`hand_profile_${id}`, JSON.stringify(data));
+        localStorage.setItem("hand_profile_latest", JSON.stringify(data));
+        addLog(`Profile locked with registered markers.`);
+      } else {
+        addLog("Profile analysis completed without markers.");
+      }
+    } catch {
+      addLog("System error. Continuing with restricted profile.");
+    } finally {
+      setIsAnalyzing(false);
+      addLog("Verification ready. Proceed to recording setup.");
+      setStep("complete");
     }
-  }, [id, router]);
-
-  // Countdown timer
-  useEffect(() => {
-    if (state !== "COUNTDOWN") return;
-    if (countdown <= 0) {
-      capture();
-      return;
-    }
-    const t = setTimeout(() => setCountdown((c) => c - 1), 1000);
-    return () => clearTimeout(t);
-  }, [state, countdown, capture]);
-
-  const startCountdown = () => {
-    setCountdown(COUNTDOWN_SECONDS);
-    setState("COUNTDOWN");
   };
 
-  useEffect(() => {
-    return () => {
-      streamRef.current?.getTracks().forEach((t) => t.stop());
-    };
-  }, []);
+  const handleRetry = () => {
+    setCapturedSnapshot(null);
+    setHandsReady(false);
+    setPrepCountdown(5);
+    addLog("Retry requested. Reposition both hands.");
+  };
+
+  const activeCopy = step === "complete" ? null : stepCopy[step];
 
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100 flex flex-col items-center justify-center px-4 py-12">
-      <div className="max-w-lg w-full">
-        <div className="mb-6 text-center">
-          <div className="text-xs text-gray-500 uppercase tracking-widest mb-2">Step 1 of 3</div>
-          <h1 className="text-2xl font-bold">Biometric Hand Registration</h1>
-          <p className="text-gray-400 text-sm mt-2">
-            Place both hands flat on the desk in front of the camera. Hold still for 5 seconds.
-          </p>
-        </div>
+    <div className="page-shell min-h-screen flex flex-col">
 
-        {/* Camera preview */}
-        <div className="relative rounded-xl overflow-hidden border border-white/10 bg-black mb-6 aspect-video">
-          <video ref={videoRef} className="w-full h-full object-cover" muted playsInline />
-          <canvas ref={canvasRef} className="hidden" />
-
-          {state === "INIT" && (
-            <div className="absolute inset-0 flex items-center justify-center bg-black/80">
-              <button
-                onClick={startCamera}
-                className="flex items-center gap-2 bg-teal-500 hover:bg-teal-400 text-gray-950 font-semibold px-6 py-3 rounded-lg transition-colors"
-              >
-                <Camera className="w-5 h-5" />
-                Enable Camera
-              </button>
-            </div>
-          )}
-
-          {state === "COUNTDOWN" && (
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="text-8xl font-bold text-teal-400 drop-shadow-lg">
-                {countdown}
-              </div>
-            </div>
-          )}
-
-          {(state === "CAPTURING" || state === "REGISTERING") && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 gap-3">
-              <Loader2 className="w-10 h-10 text-teal-400 animate-spin" />
-              <p className="text-gray-300 text-sm">
-                {state === "CAPTURING" ? "Capturing..." : "Registering biometrics..."}
-              </p>
-            </div>
-          )}
-
-          {state === "DONE" && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 gap-3">
-              <CheckCircle className="w-12 h-12 text-teal-400" />
-              <p className="text-gray-300">Registration successful</p>
-            </div>
-          )}
-        </div>
-
-        {error && (
-          <div className="flex items-center gap-2 text-red-400 text-sm mb-4">
-            <AlertCircle className="w-4 h-4" />
-            {error}
+      {/* ── Header ── */}
+      <header className="sticky top-0 z-10 border-b border-border-subtle bg-background/80 backdrop-blur">
+        <div className="page-wrap flex h-16 items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            {step === "face" ? (
+              <Link href="/session/new">
+                <Button variant="ghost" size="sm" className="gap-1.5 text-muted-foreground transition-all hover:bg-transparent! hover:text-primary hover:border-primary border border-transparent">
+                  <ArrowLeft className="size-4" />
+                  <span className="hidden sm:inline">Back</span>
+                </Button>
+              </Link>
+            ) : (
+              <Button variant="ghost" size="sm" onClick={handleBack} className="gap-1.5 text-muted-foreground transition-all hover:bg-transparent! hover:text-primary hover:border-primary border border-transparent">
+                <ArrowLeft className="size-4" />
+                <span className="hidden sm:inline">Back</span>
+              </Button>
+            )}
+            <div className="h-4 w-px bg-border-subtle" />
+            <BrandMark />
           </div>
-        )}
+          <div className="flex items-center gap-2">
+            {step !== "face" && step !== "complete" && (
+              <Button variant="ghost" size="sm" onClick={handleRestart} className="gap-1.5 text-muted-foreground transition-all hover:bg-transparent! hover:text-primary hover:border-primary border border-transparent">
+                <RotateCcw className="size-3.5" />
+                <span className="hidden sm:inline">Restart</span>
+              </Button>
+            )}
+            {devices.length > 1 && step !== "complete" && (() => {
+              const isPhone = (d: MediaDeviceInfo) =>
+                /iphone|android|continuity|mobile|back camera|front camera|back|rear/i.test(d.label);
+              const phoneCams    = devices.filter(isPhone);
+              const nonPhoneCams = devices.filter(d => !isPhone(d));
+              const currentDev   = devices[currentDeviceIndex];
+              const phoneActive  = isPhone(currentDev ?? devices[0]);
+              // Front/back detection — search all devices, not just phone-labelled ones
+              const frontIdx = devices.findIndex(d => /front/i.test(d.label));
+              const backIdx  = devices.findIndex(d => /back|rear/i.test(d.label));
+              const hasFrontBack = frontIdx !== -1 && backIdx !== -1;
 
-        {state === "CAMERA" && (
-          <button
-            onClick={startCountdown}
-            className="w-full bg-teal-500 hover:bg-teal-400 text-gray-950 font-semibold py-3 rounded-xl flex items-center justify-center gap-2 transition-colors"
-          >
-            <Hand className="w-5 h-5" />
-            Register My Hands (5s countdown)
-          </button>
-        )}
+              const pickCamera = (i: number) => {
+                userPickedDeviceRef.current = true;
+                setUserPickedDevice(true);
+                setCurrentDeviceIndex(i);
+              };
 
-        {state === "ERROR" && (
-          <button
-            onClick={() => { setError(""); setState("INIT"); }}
-            className="w-full border border-white/20 hover:border-white/40 py-3 rounded-xl transition-colors"
-          >
-            Retry
-          </button>
-        )}
+              const handleSwitch = () => {
+                if (phoneActive && nonPhoneCams.length > 0) {
+                  pickCamera(devices.indexOf(nonPhoneCams[0]));
+                } else if (!phoneActive && phoneCams.length > 0) {
+                  pickCamera(backIdx !== -1 ? backIdx : devices.indexOf(phoneCams[0]));
+                } else {
+                  pickCamera((currentDeviceIndex + 1) % devices.length);
+                }
+              };
 
-        <div className="mt-6 p-4 rounded-xl bg-white/[0.02] border border-white/10 text-xs text-gray-500 space-y-1">
-          <p>• Hand geometry is captured as a one-way mathematical ratio — raw images stay local.</p>
-          <p>• Green-channel filter is applied to enhance texture detail for accurate comparison.</p>
-          <p>• Your identity is verified continuously throughout the recording session.</p>
+              return (
+                <div className="hidden sm:flex items-center gap-2">
+                  <Button variant="ghost" size="sm" onClick={handleSwitch}
+                    className="gap-1.5 text-muted-foreground transition-all hover:bg-transparent! hover:text-primary hover:border-primary border border-transparent">
+                    <Camera className="size-3.5" />
+                    Switch camera
+                  </Button>
+                  {phoneActive && hasFrontBack && (
+                    <div className="flex items-center gap-1 rounded-full border border-border-subtle p-0.5">
+                      {[{ label: "Front", idx: frontIdx }, { label: "Back", idx: backIdx }].map(({ label, idx }) => (
+                        <button key={label} onClick={() => pickCamera(idx)}
+                          className={`rounded-full px-3 py-1 text-[11px] font-medium transition-all ${
+                            currentDeviceIndex === idx && userPickedDevice
+                              ? "bg-primary text-primary-foreground"
+                              : "text-muted-foreground hover:text-primary"
+                          }`}>{label}</button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+            <div className="h-4 w-px bg-border-subtle" />
+            <Button variant="ghost" size="sm" onClick={() => setIsMuted(!isMuted)} className="text-muted-foreground transition-all hover:bg-transparent! hover:text-primary hover:border-primary border border-transparent">
+              {isMuted ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
+            </Button>
+            <div className="h-4 w-px bg-border-subtle" />
+            <ThemeToggle />
+          </div>
+        </div>
+      </header>
+
+      {/* ── Step progress ── */}
+      <div className="border-b border-border-subtle bg-background">
+        <div className="page-wrap py-3 md:py-5">
+          <div className="flex items-start">
+            {steps.map((s, i) => {
+              const isDone = step === "complete" || currentStepIndex > i;
+              const isActive = s.key === step;
+              return (
+                <Fragment key={s.key}>
+                  <div className="flex flex-col items-center gap-2">
+                    <div className="relative flex items-center justify-center">
+                      {isActive && (
+                        <span className="absolute inline-flex size-7 rounded-full bg-primary/30 animate-ping" />
+                      )}
+                      <div className={`relative flex size-7 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold transition-all duration-300 ${
+                        isDone   ? "bg-primary text-primary-foreground" :
+                        isActive ? "bg-primary text-primary-foreground" :
+                                   "border border-border-subtle text-muted-foreground"
+                      }`}>
+                        {isDone ? <CheckCircle2 className="size-3.5" /> : i + 1}
+                      </div>
+                    </div>
+                    <span className={`text-[11px] font-medium hidden sm:block transition-colors ${
+                      isActive ? "text-foreground" : isDone ? "text-primary" : "text-muted-foreground"
+                    }`}>
+                      {s.short}
+                    </span>
+                  </div>
+                  {i < steps.length - 1 && (
+                    <div className={`mt-3.5 mx-3 h-px flex-1 transition-all duration-500 ${isDone ? "bg-primary/50" : "bg-border-subtle"}`} />
+                  )}
+                </Fragment>
+              );
+            })}
+          </div>
         </div>
       </div>
+
+      {/* ── Main ── */}
+      <main className="page-wrap flex-1 grid gap-6 py-4 md:py-8 lg:grid-cols-[1.8fr_1fr] lg:items-start">
+
+        {/* 1. Camera Section */}
+        <section className="flex flex-col gap-4 fade-up lg:col-start-1">
+          <div className="relative aspect-video overflow-hidden rounded-[28px] border border-border-subtle bg-black shadow-sm">
+            <video
+              ref={videoRef}
+              autoPlay muted playsInline
+              className={`h-full w-full object-cover transition-all duration-500 ${
+                step === "complete" ? "scale-[1.04] opacity-20 blur-sm" : capturedSnapshot ? "opacity-0" : "opacity-100"
+              }`}
+            />
+
+            {/* ── Document Capture overlay ── */}
+            {step === "ic" && (
+              <div className="absolute inset-0">
+                <svg className="absolute inset-0 h-full w-full" viewBox="0 0 16 9" preserveAspectRatio="xMidYMid slice">
+                  <defs>
+                    <mask id="doc-rect-mask">
+                      <rect width="16" height="9" fill="white" />
+                      <rect x="4.2" y="2.0" width="7.6" height="5.0" rx="0.3" fill="black" />
+                    </mask>
+                    <clipPath id="doc-rect-clip">
+                      <rect x="4.2" y="2.0" width="7.6" height="5.0" rx="0.3" />
+                    </clipPath>
+                    <pattern id="doc-dots" x="0" y="0" width="0.22" height="0.22" patternUnits="userSpaceOnUse">
+                      <circle cx="0.11" cy="0.11" r="0.02" fill="rgba(255,255,255,0.1)" />
+                    </pattern>
+                  </defs>
+
+                  {/* Dot grid */}
+                  <rect width="16" height="9" fill="url(#doc-dots)" />
+                  {/* Vignette with card cutout */}
+                  <rect width="16" height="9" fill="rgba(0,0,0,0.62)" mask="url(#doc-rect-mask)" />
+
+                  {/* Subtle card outline */}
+                  <rect x="4.2" y="2.0" width="7.6" height="5.0" rx="0.3"
+                    fill="none" stroke="rgba(255,255,255,0.15)" strokeWidth="0.04" />
+
+                  {/* Bold teal corner brackets */}
+                  <g stroke="#2dd4bf" strokeWidth="0.14" strokeLinecap="round" fill="none">
+                    {/* Top-left */}
+                    <path d="M4.2,2.55 V2.0 H4.75" />
+                    {/* Top-right */}
+                    <path d="M11.8,2.55 V2.0 H11.25" />
+                    {/* Bottom-left */}
+                    <path d="M4.2,6.45 V7.0 H4.75" />
+                    {/* Bottom-right */}
+                    <path d="M11.8,6.45 V7.0 H11.25" />
+                  </g>
+
+                  {/* Sweep line clipped to card area */}
+                  <g clipPath="url(#doc-rect-clip)">
+                    <line x1="4.2" y1="2.0" x2="11.8" y2="2.0"
+                      stroke="rgba(45,212,191,0.7)" strokeWidth="0.06"
+                      className="face-scan-sweep" />
+                  </g>
+                </svg>
+
+                {/* Status chip */}
+                <div className="absolute bottom-5 inset-x-0 flex justify-center pointer-events-none">
+                  <div className="rounded-full bg-black/65 px-5 py-2 backdrop-blur-sm">
+                    <p className="text-[11px] font-medium tracking-wide text-white">
+                      Hold the IC card flat — avoid glare
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── Apple Face ID overlay ── */}
+            {step === "face" && (
+              <div className="absolute inset-0">
+                <svg className="absolute inset-0 h-full w-full" viewBox="0 0 16 9" preserveAspectRatio="xMidYMid slice">
+                  <defs>
+                    <mask id="face-oval-mask">
+                      <rect width="16" height="9" fill="white" />
+                      <ellipse cx="8" cy="4.5" rx="2.15" ry="2.85" fill="black" />
+                    </mask>
+                    <clipPath id="face-oval-clip">
+                      <ellipse cx="8" cy="4.5" rx="2.15" ry="2.85" />
+                    </clipPath>
+                    <pattern id="dot-grid" x="0" y="0" width="0.22" height="0.22" patternUnits="userSpaceOnUse">
+                      <circle cx="0.11" cy="0.11" r="0.022" fill="rgba(255,255,255,0.12)" />
+                    </pattern>
+                  </defs>
+                  <rect width="16" height="9" fill="url(#dot-grid)" />
+                  <rect width="16" height="9" fill="rgba(0,0,0,0.58)" mask="url(#face-oval-mask)" />
+
+                  {/* Dashed oval — searching or detected */}
+                  {(faceState === "searching" || faceState === "detected") && (
+                    <ellipse cx="8" cy="4.5" rx="2.15" ry="2.85" fill="none"
+                      stroke={faceState === "detected" ? "rgba(255,255,255,0.75)" : "rgba(255,255,255,0.32)"}
+                      strokeWidth="0.05" strokeDasharray="0.18 0.09" />
+                  )}
+
+                  {/* Corner marks — searching only */}
+                  {faceState === "searching" && (<>
+                    <path d="M7.55,1.68 H8.45" stroke="#2dd4bf" strokeWidth="0.11" strokeLinecap="round" />
+                    <path d="M7.55,7.32 H8.45" stroke="#2dd4bf" strokeWidth="0.11" strokeLinecap="round" />
+                    <path d="M5.82,4.15 V4.85" stroke="#2dd4bf" strokeWidth="0.11" strokeLinecap="round" />
+                    <path d="M10.18,4.15 V4.85" stroke="#2dd4bf" strokeWidth="0.11" strokeLinecap="round" />
+                  </>)}
+
+                  {/* Countdown number inside oval — pre-scan */}
+                  {faceState === "countdown" && (
+                    <text x="8" y="5.15" textAnchor="middle" fill="white"
+                      fontSize="2.2" fontWeight="600" fontFamily="system-ui">
+                      {faceCountdown}
+                    </text>
+                  )}
+
+                  {/* Scan countdown number + sweep line — during ring rotation */}
+                  {faceState === "scanning" && (
+                    <g clipPath="url(#face-oval-clip)">
+                      {/* Top-to-bottom scan line */}
+                      <line x1="5.5" y1="1.65" x2="10.5" y2="1.65"
+                        stroke="rgba(255,255,255,0.55)" strokeWidth="0.05"
+                        className="face-scan-sweep" />
+                      {/* Countdown number centred in oval */}
+                      <text x="8" y="5.1" textAnchor="middle" fill="white"
+                        fontSize="1.6" fontWeight="700" fontFamily="system-ui" opacity="0.9">
+                        {scanCountdown}
+                      </text>
+                    </g>
+                  )}
+
+                  {/* Progress ring — path starts at 12 o'clock, draws clockwise, no rotation */}
+                  {(faceState === "scanning" || faceState === "captured") && (
+                    <path
+                      d="M 8 1.65 A 2.15 2.85 0 0 1 10.15 4.5 A 2.15 2.85 0 0 1 8 7.35 A 2.15 2.85 0 0 1 5.85 4.5 A 2.15 2.85 0 0 1 8 1.65"
+                      fill="none"
+                      stroke={faceState === "captured" ? "#22c55e" : "white"}
+                      strokeWidth="0.07" strokeLinecap="round"
+                      strokeDasharray="16 100"
+                      strokeDashoffset={faceState === "captured" ? "0" : "16"}
+                      className={faceState === "scanning" ? "face-scan-ring" : ""}
+                    />
+                  )}
+
+                  {/* Captured check — solid circle bg + clean tick */}
+                  {faceState === "captured" && (
+                    <g>
+                      {/* Outer glow ring */}
+                      <circle cx="8" cy="4.5" r="1.1" fill="rgba(34,197,94,0.12)" />
+                      {/* Solid green circle */}
+                      <circle cx="8" cy="4.5" r="0.78" fill="#22c55e" />
+                      {/* White tick — scaled to fit cleanly inside circle */}
+                      <path d="M7.68,4.52 L7.9,4.74 L8.38,4.2"
+                        stroke="white" strokeWidth="0.1" fill="none"
+                        strokeLinecap="round" strokeLinejoin="round" />
+                    </g>
+                  )}
+                </svg>
+
+                {faceState === "captured" && (
+                  <div className="absolute inset-0 bg-white/15 pointer-events-none" />
+                )}
+
+                <div className="absolute bottom-5 inset-x-0 flex justify-center pointer-events-none">
+                  <div className="rounded-full bg-black/65 px-5 py-2 backdrop-blur-sm">
+                    <p className="text-[11px] font-medium tracking-wide text-white">
+                      {faceState === "searching" && "Position your face within the oval"}
+                      {faceState === "detected"  && "Face detected — hold still"}
+                      {faceState === "countdown" && `Scanning in ${faceCountdown}…`}
+                      {faceState === "scanning"  && "Hold still — scanning…"}
+                      {faceState === "captured"  && "✓  Identity captured"}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {capturedSnapshot && step === "hands" && (
+              <Image src={capturedSnapshot} alt="Captured frame" className="absolute inset-0 h-full w-full object-cover" fill unoptimized />
+            )}
+
+            {step === "hands" && !capturedSnapshot && (
+              <div className="absolute inset-0 flex items-center justify-center">
+                {/* Hand placement guide */}
+                <div className="relative h-[72%] w-[84%]">
+                  {/* SVG guide overlay */}
+                  <svg className="absolute inset-0 w-full h-full overflow-visible" viewBox="0 0 100 60" preserveAspectRatio="none">
+                    {/* Outer guide rect — teal corners only */}
+                    <g stroke="#2dd4bf" strokeWidth="0.8" strokeLinecap="round" fill="none">
+                      {/* top-left */}
+                      <path d="M0,8 L0,0 L10,0" />
+                      {/* top-right */}
+                      <path d="M90,0 L100,0 L100,8" />
+                      {/* bottom-left */}
+                      <path d="M0,52 L0,60 L10,60" />
+                      {/* bottom-right */}
+                      <path d="M90,60 L100,60 L100,52" />
+                      {/* center divider */}
+                      <line x1="50" y1="8" x2="50" y2="52" strokeDasharray="2 2" strokeOpacity="0.35" />
+                    </g>
+                    {/* Left hand silhouette hint */}
+                    <g opacity="0.12" fill="white">
+                      <ellipse cx="26" cy="30" rx="14" ry="18" />
+                    </g>
+                    {/* Right hand silhouette hint */}
+                    <g opacity="0.12" fill="white">
+                      <ellipse cx="74" cy="30" rx="14" ry="18" />
+                    </g>
+                  </svg>
+
+                  {/* Zone labels */}
+                  <div className="absolute inset-0 flex">
+                    <div className="flex-1 flex flex-col items-center justify-end pb-4 gap-1">
+                      <Hand className="size-5 text-white/30 -scale-x-100" />
+                      <span className="text-[10px] font-medium tracking-widest uppercase text-white/40">Left hand</span>
+                    </div>
+                    <div className="flex-1 flex flex-col items-center justify-end pb-4 gap-1">
+                      <Hand className="size-5 text-white/30" />
+                      <span className="text-[10px] font-medium tracking-widest uppercase text-white/40">Right hand</span>
+                    </div>
+                  </div>
+
+                  {/* Status chip */}
+                  <div className="absolute -top-8 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-black/60 px-3.5 py-1.5 text-[11px] font-medium text-white/80 backdrop-blur-sm flex items-center gap-2">
+                    <span className="size-1.5 rounded-full bg-[#2dd4bf] inline-block animate-pulse" />
+                    {handsReady ? `Hold still — capturing in ${prepCountdown}s` : "Place both hands palm-down"}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {step === "complete" && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 fade-up">
+                <div className="flex size-16 items-center justify-center rounded-3xl bg-white/10 text-white backdrop-blur-sm ring-1 ring-white/20">
+                  <CheckCircle2 className="size-8" />
+                </div>
+                <div className="text-center">
+                  <p className="text-2xl font-semibold tracking-[-0.04em] text-white">Verification secured</p>
+                  <p className="mt-1.5 text-sm text-white/70">Identity reference locked for this session.</p>
+                </div>
+              </div>
+            )}
+
+            {/* Step label overlay */}
+            {step !== "complete" && (
+              <div className="absolute bottom-4 left-4">
+                <div className="rounded-full bg-black/55 px-3 py-1.5 text-[11px] font-medium text-white/80 backdrop-blur-sm">
+                  Step {currentStepIndex + 1} of {steps.length} — {steps[currentStepIndex]?.label}
+                </div>
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* 2. Action Card Section */}
+        <Card className="surface-1 fade-up flex flex-col lg:col-start-2 lg:row-span-2">
+          <CardContent className="flex flex-col flex-1 space-y-6 py-5 px-4 md:py-8 md:px-7">
+
+            {/* Icon + step info */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex size-12 items-center justify-center rounded-2xl border-2 border-primary/30">
+                  {step === "complete" ? <ShieldCheck className="size-5 text-primary" /> :
+                   step === "hands"    ? <Activity className="size-5 text-primary" /> :
+                                         <ShieldCheck className="size-5 text-primary" />}
+                </div>
+                <span className="text-[11px] font-medium uppercase tracking-[0.14em] text-primary">
+                  {step === "complete" ? "Complete" : `Step ${currentStepIndex + 1} of ${steps.length}`}
+                </span>
+              </div>
+
+              <div>
+                <h1 className="text-2xl font-semibold tracking-tight">
+                  {step === "complete" ? "Session Secure" : activeCopy?.title}
+                </h1>
+                <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                  {step === "complete" ? "Biometric identity and environment reference have been successfully captured. You can now proceed to the recording session." : activeCopy?.body}
+                </p>
+              </div>
+            </div>
+
+            {/* Main Action Area */}
+            <div className="flex-1 flex flex-col justify-center gap-4">
+              {step === "face" && faceState !== "scanning" && faceState !== "captured" && (
+                <Button size="lg" className="w-full h-14 text-base font-semibold shadow-xl" onClick={doFaceCapture} disabled={isCapturing}>
+                  {isCapturing ? <Loader2 className="size-4 animate-spin mr-2" /> : <Camera className="size-4 mr-2" />}
+                  Manual Identity Capture
+                </Button>
+              )}
+
+              {step === "hands" && !handsReady && !capturedSnapshot && (
+                <Button size="lg" className="w-full h-14 text-base font-semibold shadow-xl" onClick={() => setHandsReady(true)}>
+                  Ready to capture hands
+                </Button>
+              )}
+
+              {step === "hands" && handsReady && !capturedSnapshot && (
+                <div className="rounded-2xl bg-primary/5 p-6 border border-primary/20 flex flex-col items-center gap-4 text-center">
+                  <div className="relative">
+                    <Loader2 className="size-10 text-primary animate-spin" />
+                    <span className="absolute inset-0 flex items-center justify-center text-xs font-bold text-primary">
+                      {prepCountdown}
+                    </span>
+                  </div>
+                  <div>
+                    <p className="font-semibold">Keep steady</p>
+                    <p className="text-xs text-muted-foreground mt-1">Automatic capture in progress...</p>
+                  </div>
+                </div>
+              )}
+
+              {capturedSnapshot && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-3">
+                    <Button variant="outline" className="w-full" onClick={handleRetry} disabled={isAnalyzing}>
+                      <RotateCcw className="size-4 mr-2" />
+                      Retry
+                    </Button>
+                    <Button className="w-full" onClick={handleConfirm} disabled={isAnalyzing}>
+                      {isAnalyzing ? <Loader2 className="size-4 animate-spin mr-2" /> : <CheckCircle2 className="size-4 mr-2" />}
+                      {isAnalyzing ? "Analyzing..." : "Confirm"}
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {(step === "ic" || step === "workspace") && (
+                <Button size="lg" className="w-full h-14 text-base font-semibold shadow-xl" onClick={handleCapture} disabled={isCapturing}>
+                  {isCapturing ? <Loader2 className="size-4 animate-spin mr-2" /> : <Camera className="size-4 mr-2" />}
+                  Capture Reference
+                </Button>
+              )}
+
+              {step === "complete" && (
+                <Link href={`/session/${id}/record`} className="w-full">
+                  <Button size="lg" className="w-full h-14 text-base font-semibold shadow-xl">
+                    Start Recording
+                    <Activity className="size-4 ml-2" />
+                  </Button>
+                </Link>
+              )}
+            </div>
+
+            {/* Log Panel */}
+            <div className="rounded-2xl border border-border-subtle bg-muted/30 p-4 space-y-3">
+              <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60">
+                <Terminal className="size-3" />
+                Live Pipeline Log
+              </div>
+              <div className="space-y-2 font-mono text-[11px]">
+                {logs.map((log, i) => (
+                  <div key={i} className="flex gap-3 leading-relaxed animate-in fade-in slide-in-from-left-2 duration-300">
+                    <span className="shrink-0 text-muted-foreground/40">{log.time}</span>
+                    <span className={i === logs.length - 1 ? "text-primary font-medium" : "text-muted-foreground"}>{log.msg}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </main>
+
+      <footer className="border-t border-border-subtle py-6 bg-background">
+        <div className="page-wrap flex flex-col md:flex-row justify-between items-center gap-4 text-[11px] text-muted-foreground">
+          <div className="flex items-center gap-1.5">
+            <div className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            Zero-Trust Biometric Core v4.2.0 Active
+          </div>
+          <div className="flex gap-6">
+            <span>Neural Engine: Gemini 2.5 Flash</span>
+            <span>Hand Markers: Enabled</span>
+            <span>Frame Rate: 30 FPS</span>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }
