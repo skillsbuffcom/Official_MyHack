@@ -5,6 +5,7 @@ import { toPng } from "html-to-image";
 import { Button } from "@/components/ui/button";
 import { Download, Share2, Check, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { QRCodeSVG } from "qrcode.react";
 
 interface Props {
   workerName: string;
@@ -26,9 +27,9 @@ export function CertificateClientActions({ workerName, projectTitle }: Props) {
       
       const dataUrl = await toPng(node, {
         cacheBust: true,
-        backgroundColor: "#030712", // gray-950
+        backgroundColor: "#ffffff",
+        pixelRatio: 2,
         style: {
-          padding: "20px",
           borderRadius: "0",
         },
       });
@@ -59,14 +60,15 @@ export function CertificateClientActions({ workerName, projectTitle }: Props) {
 
   return (
     <div className="flex items-center gap-2">
+
       <Button
         variant="outline"
         size="sm"
         className="h-9 border-white/10 text-[10px] font-bold uppercase tracking-widest hover:bg-white/5"
         onClick={handleShare}
       >
-        {isCopied ? <Check className="w-3 h-3 mr-2 text-teal-400" /> : <Share2 className="w-3 h-3 mr-2" />}
-        {isCopied ? "Copied" : "Share"}
+        {isCopied ? <Check className="w-3 h-3 sm:mr-2 text-teal-400" /> : <Share2 className="w-3 h-3 sm:mr-2" />}
+        <span className="hidden sm:inline">{isCopied ? "Copied" : "Share"}</span>
       </Button>
       <Button
         variant="outline"
@@ -76,12 +78,26 @@ export function CertificateClientActions({ workerName, projectTitle }: Props) {
         disabled={isDownloading}
       >
         {isDownloading ? (
-          <Loader2 className="w-3 h-3 mr-2 animate-spin" />
+          <Loader2 className="w-3 h-3 sm:mr-2 animate-spin" />
         ) : (
-          <Download className="w-3 h-3 mr-2" />
+          <Download className="w-3 h-3 sm:mr-2" />
         )}
-        {isDownloading ? "Generating..." : "Download"}
+        <span className="hidden sm:inline">{isDownloading ? "Generating..." : "Download"}</span>
       </Button>
     </div>
+  );
+}
+
+export function CertificateQR({ id }: { id: string }) {
+  const url = `https://veripro.app/certificate/${id}`;
+
+  return (
+    <QRCodeSVG
+      value={url}
+      size={80}
+      bgColor="#ffffff"
+      fgColor="#0f172a"
+      level="M"
+    />
   );
 }

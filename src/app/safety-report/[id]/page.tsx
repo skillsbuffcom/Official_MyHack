@@ -50,10 +50,10 @@ export default async function SafetyReportPage({
     <div className="min-h-screen bg-background text-foreground font-sans selection:bg-teal-500/30 transition-colors duration-300">
       {/* Neural Background */}
       <div className="fixed inset-0 opacity-[0.03] pointer-events-none">
-        <div className="h-full w-full bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px]" />
+        <div className="h-full w-full bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-size-[24px_24px]" />
       </div>
 
-      <div className="relative z-10 max-w-4xl mx-auto px-6 py-12">
+      <div className="relative z-10 max-w-4xl mx-auto px-6 pt-20 pb-12 md:pt-32">
         {/* Navigation */}
         <nav className="flex items-center justify-between mb-12 animate-in fade-in slide-in-from-top-4 duration-500">
           <Link href={report.certificateId ? `/certificate/${report.certificateId}` : "/"}>
@@ -70,9 +70,9 @@ export default async function SafetyReportPage({
 
         {/* Main Header Card */}
         <header className="mb-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
-          <div className="flex flex-col md:flex-row gap-8 items-center bg-card border border-border rounded-[2rem] p-8 md:p-12 backdrop-blur-xl shadow-lg">
+          <div className="flex flex-col md:flex-row gap-8 items-center bg-card border border-border rounded-4xl p-8 md:p-12 backdrop-blur-xl shadow-lg">
             {/* Circular Progress */}
-            <div className="relative flex-shrink-0">
+            <div className="relative shrink-0">
                <svg className="w-40 h-40 transform -rotate-90">
                  <circle cx="80" cy="80" r="74" stroke="currentColor" strokeWidth="8" fill="transparent" className="text-muted/10" />
                  <circle cx="80" cy="80" r="74" stroke="currentColor" strokeWidth="8" fill="transparent" 
@@ -140,7 +140,7 @@ export default async function SafetyReportPage({
           {/* Side Column */}
           <div className="space-y-6">
             {/* Strengths Card */}
-            <section className="bg-primary/[0.04] border border-primary/15 rounded-2xl p-6 space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-700 delay-200">
+            <section className="bg-primary/4 border border-primary/15 rounded-2xl p-6 space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-700 delay-200">
                <h2 className="text-sm font-bold text-primary uppercase tracking-widest flex items-center gap-2">
                  <Trophy className="w-4 h-4" />
                  Key Strengths

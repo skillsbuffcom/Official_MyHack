@@ -2,6 +2,7 @@
 
 import { use, useState, useEffect, useRef, useCallback } from "react";
 import { ShieldCheck, ShieldAlert, Eye, Loader2, Activity, Zap } from "lucide-react";
+import Image from "next/image";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import Script from "next/script";
@@ -716,7 +717,7 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
       )}
 
       {/* HUD */}
-      <div className="absolute top-0 left-0 right-0 h-24 bg-gradient-to-b from-black/60 to-transparent z-10 flex items-center justify-between px-6">
+      <div className="absolute top-0 left-0 right-0 h-24 bg-linear-to-b from-black/60 to-transparent z-10 flex items-center justify-between px-6">
         <BrandMark className="scale-90 origin-left" />
         <div className="flex items-center gap-4">
           <div className="flex flex-col items-end">
@@ -785,8 +786,8 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
                 <div className="flex flex-col gap-1">
                   <p className="text-[9px] font-bold uppercase tracking-widest text-white/40 px-1">Reference</p>
                   <div className="aspect-video relative rounded-lg overflow-hidden border border-white/5">
-                    <img src={masterImage} alt="Reference" className="w-full h-full object-cover grayscale opacity-50" />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+                    <Image src={masterImage} alt="Reference" className="w-full h-full object-cover grayscale opacity-50" fill unoptimized />
+                    <div className="absolute inset-0 bg-linear-to-t from-black/60 to-transparent" />
                     <div className="absolute bottom-1 left-1 flex items-center gap-1">
                       <ShieldCheck className="size-2.5 text-[#2dd4bf]" />
                       <span className="text-[8px] font-bold text-white/60 uppercase">Locked</span>
@@ -798,8 +799,8 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
                 <div className="flex flex-col gap-1">
                   <p className="text-[9px] font-bold uppercase tracking-widest text-white/40 px-1">Last Scan</p>
                   <div className="aspect-video relative rounded-lg overflow-hidden border border-white/5">
-                    <img src={currentSnapshot} alt="Last scan" className="w-full h-full object-cover grayscale opacity-50" />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+                    <Image src={currentSnapshot} alt="Last scan" className="w-full h-full object-cover grayscale opacity-50" fill unoptimized />
+                    <div className="absolute inset-0 bg-linear-to-t from-black/60 to-transparent" />
                     <div className="absolute bottom-1 left-1">
                       <span className="text-[8px] font-bold text-white/60 uppercase">Live</span>
                     </div>

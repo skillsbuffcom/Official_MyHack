@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "VeriPro — AI Skills Verification",
   description:
-    "Turn any job posting into a verified practical assessment. AI-mentored, biometrically verified, employer-trusted.",
+    "Turn any role description into a verified practical assessment. AI-mentored, biometrically verified, employer-trusted.",
 };
 
 import { Providers } from "@/components/providers";

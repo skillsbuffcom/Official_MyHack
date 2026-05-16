@@ -2,6 +2,7 @@ import { db } from "@/lib/firebase";
 import { collection, query, where, orderBy, getDocs, Timestamp } from "firebase/firestore/lite";
 import { Award, Shield, Calendar, ExternalLink } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { BrandMark } from "@/components/brand-mark";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { CopyLinkButton } from "@/components/profile/CopyLinkButton";
@@ -23,19 +24,29 @@ interface CertCard {
 }
 
 const GRADE_COLOURS: Record<string, string> = {
-  A: "text-green-600 dark:text-green-400 border-green-200 dark:border-green-700/50 bg-green-50 dark:bg-green-900/20",
-  B: "text-teal-600 dark:text-teal-400 border-teal-200 dark:border-teal-700/50 bg-teal-50 dark:bg-teal-900/20",
-  C: "text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-700/50 bg-amber-50 dark:bg-amber-900/20",
-  D: "text-orange-600 dark:text-orange-400 border-orange-200 dark:border-orange-700/50 bg-orange-50 dark:bg-orange-900/20",
-  F: "text-red-600 dark:text-red-400 border-red-200 dark:border-red-700/50 bg-red-50 dark:bg-red-900/20",
+  A: "text-green-600 dark:text-green-400 border-green-300 dark:border-green-700/50",
+  B: "text-teal-600 dark:text-teal-400 border-teal-300 dark:border-teal-700/50",
+  C: "text-amber-600 dark:text-amber-400 border-amber-300 dark:border-amber-700/50",
+  D: "text-orange-600 dark:text-orange-400 border-orange-300 dark:border-orange-700/50",
+  F: "text-red-600 dark:text-red-400 border-red-300 dark:border-red-700/50",
 };
 
 const HIRE_SIGNAL_STYLES: Record<string, string> = {
-  "Strong Hire": "text-green-600 dark:text-green-400 border-green-200 dark:border-green-700/50 bg-green-50 dark:bg-green-900/20",
-  "Hire": "text-teal-600 dark:text-teal-400 border-teal-200 dark:border-teal-700/50 bg-teal-50 dark:bg-teal-900/20",
-  "Needs Development": "text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-700/50 bg-amber-50 dark:bg-amber-900/20",
-  "Not Recommended": "text-red-600 dark:text-red-400 border-red-200 dark:border-red-700/50 bg-red-50 dark:bg-red-900/20",
+  "Strong Hire":       "text-green-600 dark:text-green-400 border-green-300 dark:border-green-700/50",
+  "Hire":              "text-teal-600 dark:text-teal-400 border-teal-300 dark:border-teal-700/50",
+  "Needs Development": "text-amber-600 dark:text-amber-400 border-amber-300 dark:border-amber-700/50",
+  "Not Recommended":   "text-red-600 dark:text-red-400 border-red-300 dark:border-red-700/50",
 };
+
+const GRADE_HEX: Record<string, string> = {
+  A: "#16a34a", B: "#0d9488", C: "#d97706", D: "#ea580c", F: "#dc2626",
+};
+
+function safetyColor(score: number): string {
+  if (score >= 80) return "#16a34a";
+  if (score >= 60) return "#d97706";
+  return "#dc2626";
+}
 
 export async function generateMetadata({
   params,
@@ -105,9 +116,9 @@ export default async function ProfilePage({
   if (certs.length === 0) {
     return (
       <div className="min-h-screen bg-background text-foreground transition-colors duration-300">
-        <nav className="border-b border-border">
+        <nav className="border-b border-border bg-background/80 backdrop-blur-xl sticky top-0 z-50">
           <div className="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
-            <Link href="/" className="font-bold text-lg tracking-tight hover:opacity-80 transition-opacity">VeriPro</Link>
+            <BrandMark />
             <div className="flex items-center gap-4">
               <Link href="/intake" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Get Verified</Link>
               <ThemeToggle />
@@ -139,11 +150,13 @@ export default async function ProfilePage({
   return (
     <div className="min-h-screen bg-background text-foreground transition-colors duration-300">
       {/* Nav */}
-      <nav className="border-b border-border px-6 py-4 flex items-center justify-between sticky top-0 bg-background/80 backdrop-blur-md z-50">
-        <Link href="/" className="font-bold text-lg tracking-tight hover:opacity-80 transition-opacity">VeriPro</Link>
-        <div className="flex items-center gap-4">
-          <Link href="/intake" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Get Verified</Link>
-          <ThemeToggle />
+      <nav className="border-b border-border bg-background/80 backdrop-blur-xl sticky top-0 z-50">
+        <div className="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
+          <BrandMark />
+          <div className="flex items-center gap-4">
+            <Link href="/intake" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Get Verified</Link>
+            <ThemeToggle />
+          </div>
         </div>
       </nav>
 
@@ -154,7 +167,7 @@ export default async function ProfilePage({
           
           <div className="flex flex-col md:flex-row md:items-end justify-between gap-8 relative">
             <div>
-              <div className="inline-flex items-center gap-2 px-2 py-1 rounded-md bg-teal-100 dark:bg-teal-900/30 border border-teal-200 dark:border-teal-700/30 text-teal-700 dark:text-teal-400 text-[10px] font-bold uppercase tracking-wider mb-4">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-primary/30 text-primary text-[10px] font-bold uppercase tracking-widest mb-4">
                 Verified Portfolio
               </div>
               <h1 className="text-5xl font-bold tracking-tight mb-4">{workerName}</h1>
@@ -182,11 +195,11 @@ export default async function ProfilePage({
             </div>
             <div className="p-4 rounded-xl border border-border bg-card shadow-sm dark:shadow-none">
               <div className="text-[10px] text-muted-foreground uppercase tracking-widest mb-1">Top Grade</div>
-              <div className="text-2xl font-bold text-teal-600 dark:text-teal-400">{topGrade}</div>
+              <div className="text-2xl font-bold" style={{ color: GRADE_HEX[topGrade] ?? "inherit" }}>{topGrade}</div>
             </div>
             <div className="p-4 rounded-xl border border-border bg-card shadow-sm dark:shadow-none">
               <div className="text-[10px] text-muted-foreground uppercase tracking-widest mb-1">Avg Safety</div>
-              <div className="text-2xl font-bold text-green-600 dark:text-green-400">{avgSafety}%</div>
+              <div className="text-2xl font-bold" style={{ color: safetyColor(avgSafety) }}>{avgSafety}%</div>
             </div>
             <div className="p-4 rounded-xl border border-border bg-card shadow-sm dark:shadow-none">
               <div className="text-[10px] text-muted-foreground uppercase tracking-widest mb-1">Verification</div>
@@ -235,7 +248,7 @@ export default async function ProfilePage({
                   </div>
                   
                   <div className="flex items-center gap-6 self-stretch md:self-auto">
-                    <div className="h-16 w-[1px] bg-border hidden md:block" />
+                    <div className="h-16 w-px bg-border hidden md:block" />
                     <div className="flex flex-col items-center">
                       <div
                         className={`text-4xl font-black w-20 h-20 rounded-2xl border-2 flex items-center justify-center shadow-lg transition-transform group-hover:scale-105 ${
