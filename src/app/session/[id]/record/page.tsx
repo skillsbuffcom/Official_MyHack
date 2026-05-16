@@ -115,8 +115,7 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
   const isDeepScanningRef = useRef(false);
   const isCheckingHandPresenceRef = useRef(false);
   const noHandSinceRef = useRef<number | null>(null);
-  const HAND_LOST_MS = 600; 
-  const HARD_LOST_MS = 12000; // 12s — plenty of time for AI to confirm clasped hands
+  const HAND_LOST_MS = 1500;
   const VERIFY_HOLD_SECONDS = 4;
   const VERIFY_HOLD_MS = 4100;
   const VERIFY_COOLDOWN_MS = 12000;
@@ -219,7 +218,7 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
       const data = await res.json() as { handsVisible?: boolean; confidence?: number; description?: string };
       console.log("[AI]: Hand presence check:", data);
 
-      if (isFlaggedRef.current === false && data.handsVisible === false && Number(data.confidence ?? 0) >= 0.80) {
+      if (isFlaggedRef.current === false && data.handsVisible === false && Number(data.confidence ?? 0) >= 0.55) {
         flagHandsLeftFrame();
       } else if (isFlaggedRef.current === false) {
         noHandSinceRef.current = null;
@@ -605,17 +604,11 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
         }
       } else {
         if (noHandSinceRef.current === null) noHandSinceRef.current = Date.now();
-        const missingDuration = Date.now() - noHandSinceRef.current;
-        if (missingDuration < HAND_LOST_MS) return;
+        if (Date.now() - noHandSinceRef.current < HAND_LOST_MS) return;
         if (!handPresentRef.current) return;
 
         if (isFlaggedRef.current === false) {
-          // If gone for > 3s, don't wait for AI anymore
-          if (missingDuration > HARD_LOST_MS) {
-            flagHandsLeftFrame();
-          } else {
-            void verifyLockedHandPresence();
-          }
+          void verifyLockedHandPresence();
           return;
         }
 
@@ -697,8 +690,6 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
     ? "Identity confirmed"
     : waitingForGesture
       ? `Scanning in ${gestureCountdown ?? VERIFY_HOLD_SECONDS}…`
-    : isCheckingHandPresenceRef.current
-      ? "AI Confirming Presence..."
       : handPresent
         ? "Show BOTH backhands to verify"
         : isFlagged
@@ -742,12 +733,12 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
       {/* Biometric Status */}
       <div className="absolute left-6 top-32 z-10 flex flex-col gap-4 w-72">
         <Card className="bg-black/60 backdrop-blur-xl border-white/10 p-4 rounded-2xl flex items-center gap-4">
-          <div className={`size-12 rounded-2xl flex items-center justify-center border-2 ${isFlagged === false ? "border-[#2dd4bf] bg-[#2dd4bf]/10 text-white" : isFlagged === true ? "border-red-500 bg-red-500/10 text-red-500" : "border-white/20 bg-white/5 text-white/40"}`}>
+          <div className={`size-12 rounded-2xl flex items-center justify-center border-2 ${isFlagged === false ? "border-[#2dd4bf] bg-[#2dd4bf]/10 text-[#2dd4bf]" : isFlagged === true ? "border-red-500 bg-red-500/10 text-red-500" : "border-white/20 bg-white/5 text-white/40"}`}>
             {isFlagged === false ? <ShieldCheck /> : isFlagged === true ? <ShieldAlert /> : <Eye />}
           </div>
           <div>
             <p className="text-[10px] font-bold uppercase tracking-widest text-white/40">{statusLabel}</p>
-            <p className="text-sm font-medium leading-none mt-1 text-white">{statusSub}</p>
+            <p className="text-sm font-medium leading-none mt-1">{statusSub}</p>
           </div>
         </Card>
 
