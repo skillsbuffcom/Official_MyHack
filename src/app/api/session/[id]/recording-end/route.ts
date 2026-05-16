@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/firebase";
-import { doc, updateDoc, serverTimestamp } from "firebase/firestore";
+import { doc, updateDoc } from "firebase/firestore/lite";
 import { processSession } from "@/lib/pipeline";
 
 export const dynamic = 'force-dynamic';
@@ -12,14 +12,11 @@ export async function POST(
   const { id } = await context.params;
   try {
     await updateDoc(doc(db, "sessions", id), {
-      status: "PROCESSING",
-      sessionEnd: serverTimestamp(),
+      status: "RECORDING_ENDED",
     });
 
-    // Run pipeline async — don't await so we can return 200 immediately
-    processSession(id).catch((e) =>
-      console.error("processSession failed:", e)
-    );
+    // Start background processing
+    await processSession(id);
 
     return NextResponse.json({ ok: true });
   } catch (err) {

@@ -39,7 +39,7 @@ function BriefContent() {
     async function load() {
       try {
         const { db } = await import("@/lib/firebase");
-        const { doc, getDoc } = await import("firebase/firestore");
+        const { doc, getDoc } = await import("firebase/firestore/lite");
         const snap = await getDoc(doc(db, "jobPostings", postingId!));
         if (!snap.exists()) {
           setError("Assessment not found.");

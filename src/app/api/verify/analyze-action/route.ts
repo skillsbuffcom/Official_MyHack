@@ -1,5 +1,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { NextRequest, NextResponse } from "next/server";
+import { parseJSON } from "@/lib/gemini";
 
 export const dynamic = 'force-dynamic';
 
@@ -67,8 +68,7 @@ export async function POST(req: NextRequest) {
       ACTION_DETECTION_PROMPT,
     ]);
 
-    const text = result.response.text().trim().replace(/^```json\n?|\n?```$/g, "");
-    const parsed = JSON.parse(text);
+    const parsed = parseJSON(result.response.text());
 
     return NextResponse.json({ ...parsed, timestamp });
   } catch (err) {

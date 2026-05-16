@@ -1,10 +1,9 @@
 "use client";
 import { use, useRef, useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { Shield, ShieldAlert, Loader2, Clock, CheckCircle } from "lucide-react";
+import { Shield, ShieldAlert, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
-const HAND_LOSS_TIMEOUT_MS = 1500;
 const GESTURE_HOLD_MS = 4000;
 const BLUR_THRESHOLD = 50;
 const BLUR_ATTEMPTS = 2;
@@ -65,14 +64,13 @@ export default function RecordPage({ params }: { params: Promise<{ id: string }>
   const actionIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const chunkIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const elapsedIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const chunkIndexRef = useRef(0);
+  const presenceIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const recordingStartRef = useRef<Date | null>(null);
 
   const [status, setStatus] = useState<"INIT" | "CAMERA" | "RECORDING" | "FINISHING">("INIT");
   const [biometricState, setBiometricState] = useState<"LOCKED" | "SCANNING" | "LOST" | "CHECKING">("LOST");
   const [flagCount, setFlagCount] = useState(0);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const [handsPresent, setHandsPresent] = useState(false);
   const [lastAction, setLastAction] = useState<string | null>(null);
 
   const masterBase64 = useRef<string>("");
@@ -108,6 +106,28 @@ export default function RecordPage({ params }: { params: Promise<{ id: string }>
 
     return best.base64 ? best : null;
   }, []);
+
+  const finishSession = useCallback(async () => {
+    setStatus("FINISHING");
+
+    // Stop intervals
+    if (chunkIntervalRef.current) clearInterval(chunkIntervalRef.current);
+    if (actionIntervalRef.current) clearInterval(actionIntervalRef.current);
+    if (elapsedIntervalRef.current) clearInterval(elapsedIntervalRef.current);
+    if (presenceIntervalRef.current) clearInterval(presenceIntervalRef.current);
+    if (handLossTimerRef.current) clearTimeout(handLossTimerRef.current);
+    if (gestureHoldTimerRef.current) clearTimeout(gestureHoldTimerRef.current);
+
+    // Stop recorder
+    if (recorderRef.current?.state === "recording") {
+      recorderRef.current.stop();
+    }
+    // Stop camera
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+
+    await fetch(`/api/session/${id}/recording-end`, { method: "POST" });
+    router.push(`/session/${id}/processing`);
+  }, [id, router]);
 
   const runDeepAuth = useCallback(async () => {
     setBiometricState("CHECKING");
@@ -165,7 +185,7 @@ export default function RecordPage({ params }: { params: Promise<{ id: string }>
     } catch {
       setBiometricState("LOST");
     }
-  }, [captureFrame, flagCount, id]);
+  }, [captureFrame, flagCount, id, finishSession]);
 
   const onHandLost = useCallback(() => {
     if (biometricState === "LOCKED") {
@@ -287,7 +307,7 @@ export default function RecordPage({ params }: { params: Promise<{ id: string }>
 
     // Simulate basic hand presence detection (polling video brightness as proxy)
     // In production this would use MediaPipe; for demo we simulate detection
-    const presenceInterval = setInterval(() => {
+    presenceIntervalRef.current = setInterval(() => {
       const video = videoRef.current;
       const canvas = canvasRef.current;
       if (!video || !canvas) return;
@@ -302,34 +322,11 @@ export default function RecordPage({ params }: { params: Promise<{ id: string }>
       }
       brightness /= (imageData.data.length / 4) * 3;
       const detected = brightness > 30; // basic heuristic
-      setHandsPresent(detected);
       if (detected) onHandDetected();
       else onHandLost();
     }, 500);
-
-    return () => clearInterval(presenceInterval);
   }, [id, captureAndSaveAction, onHandDetected, onHandLost]);
 
-  const finishSession = useCallback(async () => {
-    setStatus("FINISHING");
-
-    // Stop intervals
-    if (chunkIntervalRef.current) clearInterval(chunkIntervalRef.current);
-    if (actionIntervalRef.current) clearInterval(actionIntervalRef.current);
-    if (elapsedIntervalRef.current) clearInterval(elapsedIntervalRef.current);
-    if (handLossTimerRef.current) clearTimeout(handLossTimerRef.current);
-    if (gestureHoldTimerRef.current) clearTimeout(gestureHoldTimerRef.current);
-
-    // Stop recorder
-    if (recorderRef.current?.state === "recording") {
-      recorderRef.current.stop();
-    }
-    // Stop camera
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-
-    await fetch(`/api/session/${id}/recording-end`, { method: "POST" });
-    router.push(`/session/${id}/processing`);
-  }, [id, router]);
 
   useEffect(() => {
     startCamera().catch(() => {

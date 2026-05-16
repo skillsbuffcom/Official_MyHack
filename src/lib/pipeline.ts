@@ -13,7 +13,7 @@ import {
   setDoc,
   updateDoc,
   serverTimestamp,
-} from "firebase/firestore";
+} from "firebase/firestore/lite";
 import crypto from "crypto";
 
 async function setSessionStatus(sessionId: string, status: string) {

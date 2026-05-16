@@ -1,5 +1,5 @@
 import { db } from "@/lib/firebase";
-import { doc, getDoc } from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore/lite";
 import { Shield, AlertTriangle, CheckCircle } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";

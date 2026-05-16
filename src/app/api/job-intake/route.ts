@@ -1,7 +1,8 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/firebase";
-import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { collection, addDoc, serverTimestamp } from "firebase/firestore/lite";
+import { parseJSON } from "@/lib/gemini";
 
 export const dynamic = 'force-dynamic';
 
@@ -22,6 +23,8 @@ Return ONLY valid JSON, no other text:
   "preferred_skills": ["skill 1", "skill 2"],
   "raw_description": "One sentence summarising the role and main responsibility"
 }
+
+CRITICAL: Respond ONLY with valid JSON. Ensure all arrays are correctly closed with brackets and no trailing commas.
 
 Rules:
 - required_skills: 3–10 items, only what is explicitly required or essential
@@ -54,9 +57,6 @@ Return ONLY valid JSON:
 }`;
 }
 
-function parseJSON(text: string): Record<string, unknown> {
-  return JSON.parse(text.trim().replace(/^```json\n?|\n?```$/g, ""));
-}
 
 export async function POST(req: NextRequest) {
   try {
@@ -80,8 +80,11 @@ export async function POST(req: NextRequest) {
     ]);
     const extracted = parseJSON(extractResult.response.text());
 
-    if (extracted.error) {
-      return NextResponse.json({ error: extracted.error }, { status: 422 });
+    if (extracted.error || !extracted.role_title) {
+      return NextResponse.json(
+        { error: extracted.error || "Failed to extract structured data from job posting" },
+        { status: 422 }
+      );
     }
 
     // Call 2: project brief

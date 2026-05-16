@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, storage } from "@/lib/firebase";
-import { doc, updateDoc, increment } from "firebase/firestore";
+import { doc, updateDoc, increment } from "firebase/firestore/lite";
 import { ref, uploadBytes } from "firebase/storage";
 
 export const dynamic = 'force-dynamic';

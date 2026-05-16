@@ -6,7 +6,7 @@ import {
   where,
   orderBy,
   getDocs,
-} from "firebase/firestore";
+} from "firebase/firestore/lite";
 
 export const dynamic = 'force-dynamic';
 

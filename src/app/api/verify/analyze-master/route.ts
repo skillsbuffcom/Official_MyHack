@@ -2,6 +2,8 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { NextRequest, NextResponse } from "next/server";
 import { HAND_REGISTRATION_PROMPT } from "@/lib/gemini";
 
+import { parseJSON } from "@/lib/gemini";
+
 export const dynamic = 'force-dynamic';
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
@@ -17,8 +19,7 @@ export async function POST(req: NextRequest) {
       HAND_REGISTRATION_PROMPT,
     ]);
 
-    const text = result.response.text().trim().replace(/^```json\n?|\n?```$/g, "");
-    const parsed = JSON.parse(text);
+    const parsed = parseJSON(result.response.text());
 
     return NextResponse.json(parsed);
   } catch (err) {

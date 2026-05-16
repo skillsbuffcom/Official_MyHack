@@ -2,7 +2,6 @@
 import { use, useRef, useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Camera, Loader2, CheckCircle, AlertCircle, Hand } from "lucide-react";
-import { toast } from "sonner";
 
 const COUNTDOWN_SECONDS = 5;
 

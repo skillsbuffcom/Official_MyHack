@@ -127,9 +127,23 @@ Output ONLY valid JSON:
   "lecturer_closing_remark": "One encouraging but honest closing statement."
 }`;
 
-function parseJSON(text: string): Record<string, unknown> {
-  const cleaned = text.trim().replace(/^```json\n?|\n?```$/g, "");
-  return JSON.parse(cleaned);
+export function parseJSON(text: string): Record<string, unknown> {
+  try {
+    let cleaned = text.trim().replace(/^```json\n?|\n?```$/g, "");
+    
+    // Attempt to fix common LLM JSON errors:
+    // 1. Remove trailing commas in arrays/objects
+    cleaned = cleaned.replace(/,(\s*[\]}])/g, "$1");
+    
+    // 2. Fix weird newline quotes like: "string" \n ",
+    cleaned = cleaned.replace(/"\s*\n\s*",/g, '",');
+    
+    return JSON.parse(cleaned);
+  } catch {
+    console.error("Failed to parse Gemini JSON:", text);
+    // Return a safe minimal object based on typical usage
+    return {};
+  }
 }
 
 export async function evaluateSession(

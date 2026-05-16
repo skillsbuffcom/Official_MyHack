@@ -1,5 +1,5 @@
 import { db } from "@/lib/firebase";
-import { collection, query, where, orderBy, getDocs, Timestamp } from "firebase/firestore";
+import { collection, query, where, orderBy, getDocs, Timestamp } from "firebase/firestore/lite";
 import { Award, Shield, Calendar, Copy, ExternalLink } from "lucide-react";
 import Link from "next/link";
 import type { Metadata } from "next";
