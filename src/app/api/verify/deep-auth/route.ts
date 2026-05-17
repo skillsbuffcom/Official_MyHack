@@ -401,7 +401,7 @@ Respond ONLY with valid JSON:
       }
 
       if (audit.accessories?.changed) {
-        warnings.push(`accessories_changed: reg=${audit.accessories.registered ?? "none"}, obs=${audit.accessories.observed ?? "none"}`);
+        flags.push(`accessories_changed: reg=${audit.accessories.registered ?? "none"}, obs=${audit.accessories.observed ?? "none"}`);
       }
 
       const isMismatch = flags.length > 0;

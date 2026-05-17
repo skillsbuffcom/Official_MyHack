@@ -428,6 +428,7 @@ export default function RecordSessionPage({ params }: { params: Promise<{ id: st
             answer: markerRows.map(m => `${m.status === "confirmed" ? "ok" : m.status}: ${m.type ?? "mark"} ${m.location ?? ""}`.trim()).join(" | "), 
             flags: f.some(s => s.startsWith("marker")) 
           }] : []),
+          { q: "ACC", label: "Accessories", answer: (o.accessories as string) ?? "none", flags: f.some(s => s.startsWith("accessories")) }
         ];
         setScanBreakdown(isMatch ? rows.filter(row => !row.flags) : rows);
       }
